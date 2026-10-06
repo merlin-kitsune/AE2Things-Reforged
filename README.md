@@ -3,7 +3,7 @@ Neat little additions to AE2: Forge
 
 ## AE2 Things Reforged
 
-This fork (https://github.com/merlin-kitsune/AE2Things-Forge) is a reforged version of the original AE2 Things that
+This fork (https://github.com/merlin-kitsune/AE2Things-Reforged) is a reforged version of the original AE2 Things that
 keeps every feature of the original mod. It targets the modern AE2 API (19.2.18) and NeoForge 21.1.248 on
 Minecraft 1.21.1, and it removes a large amount of the extra performance overhead that high concurrency used to cause:
 
