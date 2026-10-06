@@ -26,14 +26,13 @@ displayURL="https://www.curseforge.com/minecraft/mc-mods/ae2-things-forge"
 # A file name (in the root of the mod JAR) containing a logo for display
 logoFile="icon.png"
 # A text field displayed in the mod UI
-credits="Thanks to ProjectET for the initial Fabric version." #optional
+credits="Thanks to ProjectET for the initial Fabric version. Maintained by the AE2 Things Reforged fork." #optional
 # A text field displayed in the mod UI
 authors="ProjectET, Technici4n" #optional
 # The description text for the mod (multi line!) (#mandatory)
 description='''
-This mod adds a new type of cell the DISK: Deep Item Storage disK.
-This cell has no type limits and one item counts as one byte.
-Due to limitations with the cell format, you lose 24 bytes per kibibyte, but hey a small price to pay for no types right?
+A reforged version of the original AE2 Things that keeps every feature of the original mod.
+This build targets the modern AE2 API and removes a large amount of the extra performance overhead that high concurrency used to cause.
 '''
 
 [[mixins]]
@@ -46,7 +45,7 @@ config="mixins.ae2things.json"
     # Does this dependency have to exist - if not, ordering below must be specified
     type="required"
     # The version range of the dependency
-    versionRange="[21.1.0,)" #mandatory
+    versionRange="[21.1.248,)" #mandatory
     # An ordering relationship for the dependency - BEFORE or AFTER required if the relationship is not mandatory
     ordering="NONE"
     # Side this dependency is applied on - BOTH, CLIENT or SERVER
@@ -61,6 +60,6 @@ config="mixins.ae2things.json"
 [[dependencies.ae2things]]
     modId="ae2"
     type="required"
-    versionRange = "[19.0.0-beta, 20.0.0)"
+    versionRange = "[19.2.18, 20.0.0)"
     ordering="AFTER"
     side="BOTH"

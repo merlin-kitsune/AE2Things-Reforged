@@ -10,11 +10,11 @@ version = System.getenv("AE2THINGS_VERSION") ?: "0.0.0"
 
 repositories {
     maven {
-        name = "Modmaven"
-        url = uri("https://modmaven.dev/")
+        name = "Modrinth"
+        url = uri("https://api.modrinth.com/maven")
 
         content {
-            includeGroup("appeng")
+            includeGroup("maven.modrinth")
         }
     }
 
@@ -33,8 +33,9 @@ configurations {
 }
 
 dependencies {
-    implementation "appeng:appliedenergistics2:${ae2_version}"
+    implementation "maven.modrinth:ae2:${ae2_version}"
     localRuntimeOnly "dev.emi:emi-neoforge:${emi_version}"
+    localRuntimeOnly "maven.modrinth:guideme:${guideme_version}"
 }
 
 sourceSets {
@@ -115,38 +116,5 @@ spotless {
         target("src/*/resources/**/*.json")
         targetExclude("src/generated/resources/**")
         prettier().config(parser: "json")
-    }
-}
-
-////////////////
-// CurseForge
-System.getenv("CURSEFORGE")?.with { String key ->
-    curseforge {
-        apiKey = key
-
-        project {
-            id = "609977"
-            changelogType = "markdown"
-            changelog = "View changelog at [the release page](https://github.com/Technici4n/AE2Things-Forge/releases/tag/${version})"
-
-            if (version.contains("alpha")) {
-                releaseType = "alpha"
-            } else if (version.contains("beta")) {
-                releaseType = "beta"
-            } else {
-                releaseType = "release"
-            }
-
-            addGameVersion("${minecraft_version}")
-            addGameVersion("NeoForge")
-
-            mainArtifact(jar) {
-                displayName = "AE2 Things v${version}"
-
-                relations {
-                    requiredDependency("applied-energistics-2")
-                }
-            }
-        }
     }
 }

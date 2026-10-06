@@ -179,12 +179,17 @@ public class DISKCellInventory implements StorageCell {
         var amounts = new LongArrayList(storedAmounts.size());
         var keys = new ListTag();
 
+        // Reuse the tag of every key that was already serialized before: AE2 keys compare by value, so re-running the
+        // DFU codecs for an unchanged key can only ever produce the same tag again.
+        var diskStorage = getDiskStorage();
+        var registries = storageManager.getRegistries();
+
         for (var entry : this.storedAmounts.object2LongEntrySet()) {
             long amount = entry.getLongValue();
 
             if (amount > 0) {
                 itemCount += amount;
-                keys.add(entry.getKey().toTagGeneric(storageManager.getRegistries()));
+                keys.add(diskStorage.getOrEncodeKeyTag(entry.getKey(), registries));
                 amounts.add(amount);
             }
         }
@@ -193,12 +198,17 @@ public class DISKCellInventory implements StorageCell {
             storageManager.updateDisk(getDiskUUID(), new DataStorage());
         } else {
             storageManager.modifyDisk(getDiskUUID(), keys, amounts.toArray(new long[0]), itemCount);
+            // Keys that are no longer on the disk do not have to be remembered.
+            diskStorage.pruneKeyTags(this.storedAmounts);
         }
 
-        this.storedItems = (short) this.storedAmounts.size();
+        this.storedItems = this.storedAmounts.size();
 
         this.storedItemCount = itemCount;
-        i.set(AE2Things.DATA_DISK_ITEM_COUNT, itemCount);
+        if (i.getOrDefault(AE2Things.DATA_DISK_ITEM_COUNT, 0L) != itemCount) {
+            // Writing the same item count again only churns the data component patch of the stack.
+            i.set(AE2Things.DATA_DISK_ITEM_COUNT, itemCount);
+        }
 
         this.isPersisted = true;
     }
@@ -371,6 +381,11 @@ public class DISKCellInventory implements StorageCell {
             amount = remainingItemCount;
         }
 
+        if (amount <= 0) {
+            // Nothing is inserted, so do not make the cell dirty for nothing.
+            return 0;
+        }
+
         if (mode == Actionable.MODULATE) {
             getCellItems().put(what, currentAmount + amount);
             this.saveChanges();
@@ -381,6 +396,11 @@ public class DISKCellInventory implements StorageCell {
 
     @Override
     public long extract(AEKey what, long amount, Actionable mode, IActionSource source) {
+        if (amount <= 0) {
+            // Nothing is extracted, so do not make the cell dirty for nothing.
+            return 0;
+        }
+
         // To avoid long-overflow on the extracting callers side
         var extractAmount = Math.min(Integer.MAX_VALUE, amount);
 
