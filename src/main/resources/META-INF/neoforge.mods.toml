@@ -22,13 +22,13 @@ displayName="AE2 Things" #mandatory
 # A URL to query for updates for this mod. See the JSON update specification https://mcforge.readthedocs.io/en/latest/gettingstarted/autoupdate/
 #updateJSONURL="https://change.me.example.invalid/updates.json" #optional
 # A URL for the "homepage" for this mod, displayed in the mod UI
-displayURL="https://www.curseforge.com/minecraft/mc-mods/ae2-things-forge"
+displayURL="https://github.com/merlin-kitsune/AE2Things-Forge"
 # A file name (in the root of the mod JAR) containing a logo for display
 logoFile="icon.png"
 # A text field displayed in the mod UI
 credits="Thanks to ProjectET for the initial Fabric version. Maintained by the AE2 Things Reforged fork." #optional
 # A text field displayed in the mod UI
-authors="ProjectET, Technici4n" #optional
+authors="ProjectET, Technici4n, MerlinKitsune" #optional
 # The description text for the mod (multi line!) (#mandatory)
 description='''
 A reforged version of the original AE2 Things that keeps every feature of the original mod.

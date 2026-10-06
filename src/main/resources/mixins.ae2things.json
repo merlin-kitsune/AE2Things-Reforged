@@ -2,7 +2,7 @@
   "package": "io.github.projectet.ae2things.mixin",
   "required": false,
   "minVersion": "0.8",
-  "compatibilityLevel": "JAVA_8",
+  "compatibilityLevel": "JAVA_21",
   "mixins": ["CursedInternalSlotMixin"],
   "injectors": {
     "defaultRequire": 1

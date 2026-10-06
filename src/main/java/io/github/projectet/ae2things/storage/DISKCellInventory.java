@@ -10,11 +10,9 @@ import io.github.projectet.ae2things.item.DISKDrive;
 import io.github.projectet.ae2things.util.DataStorage;
 import io.github.projectet.ae2things.util.StorageManager;
 
-import net.minecraft.nbt.ListTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
 
-import it.unimi.dsi.fastutil.longs.LongArrayList;
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
 
@@ -159,7 +157,13 @@ public class DISKCellInventory implements StorageCell {
 
     @Override
     public void persist() {
-        if (this.isPersisted || storageManager == null) {
+        if (this.isPersisted) {
+            return;
+        }
+
+        if (storageManager == null) {
+            // Without a storage manager there is nothing to write to, so retrying on every change only wastes CPU.
+            this.isPersisted = true;
             return;
         }
 
@@ -170,36 +174,36 @@ public class DISKCellInventory implements StorageCell {
                 i.remove(AE2Things.DATA_DISK_ITEM_COUNT);
                 initData();
             }
+            this.isPersisted = true;
             return;
         }
 
-        long itemCount = 0;
-
-        // add new pretty stuff...
-        var amounts = new LongArrayList(storedAmounts.size());
-        var keys = new ListTag();
-
-        // Reuse the tag of every key that was already serialized before: AE2 keys compare by value, so re-running the
-        // DFU codecs for an unchanged key can only ever produce the same tag again.
         var diskStorage = getDiskStorage();
-        var registries = storageManager.getRegistries();
-
-        for (var entry : this.storedAmounts.object2LongEntrySet()) {
-            long amount = entry.getLongValue();
-
-            if (amount > 0) {
-                itemCount += amount;
-                keys.add(diskStorage.getOrEncodeKeyTag(entry.getKey(), registries));
-                amounts.add(amount);
-            }
+        if (diskStorage == DataStorage.EMPTY) {
+            // No disk entry is backing this cell, so there is nothing to write to.
+            this.isPersisted = true;
+            return;
         }
 
-        if (keys.isEmpty()) {
-            storageManager.updateDisk(getDiskUUID(), new DataStorage());
+        // Most content changes only change the amount of a key that is already stored. Those can be written in place,
+        // which avoids rebuilding the key list and re-encoding the keys. AE2 keys compare by value, so the stored key
+        // list stays valid as long as no key was added or removed.
+        long itemCount = diskStorage.tryUpdateAmounts(this.storedAmounts);
+
+        if (itemCount < 0) {
+            // Reuse the tag of every key that was already serialized before: re-running the DFU codecs for an unchanged
+            // key can only ever produce the same tag again.
+            itemCount = diskStorage.rebuildFrom(this.storedAmounts, storageManager.getRegistries());
+
+            if (diskStorage.stackKeys.isEmpty()) {
+                storageManager.updateDisk(getDiskUUID(), new DataStorage());
+            } else {
+                storageManager.modifyDisk(getDiskUUID(), diskStorage.stackKeys, diskStorage.stackAmounts, itemCount);
+                // Keys that are no longer on the disk do not have to be remembered.
+                diskStorage.pruneKeyTags(this.storedAmounts);
+            }
         } else {
-            storageManager.modifyDisk(getDiskUUID(), keys, amounts.toArray(new long[0]), itemCount);
-            // Keys that are no longer on the disk do not have to be remembered.
-            diskStorage.pruneKeyTags(this.storedAmounts);
+            storageManager.updateDisk(getDiskUUID(), diskStorage);
         }
 
         this.storedItems = this.storedAmounts.size();
@@ -296,15 +300,19 @@ public class DISKCellInventory implements StorageCell {
         var diskStorage = getDiskStorage();
         var amounts = diskStorage.stackAmounts;
         var tags = diskStorage.stackKeys;
-        if (amounts.length != tags.size()) {
-            AELog.warn("Loading storage cell with mismatched amounts/tags: %d != %d",
-                    amounts.length, tags.size());
+        boolean corruptedTag = amounts.length != tags.size();
+        if (corruptedTag) {
+            AELog.warn("Loading storage cell with mismatched amounts/tags: %d != %d", amounts.length, tags.size());
         }
 
-        boolean corruptedTag = false;
+        // Only the entries that exist in both lists can be read: anything beyond the shorter of the two lists is
+        // unreadable and has to be dropped instead of crashing or being silently kept around.
+        int entries = Math.min(amounts.length, tags.size());
+
+        diskStorage.resetKeyIndex();
         var registries = storageManager.getRegistries();
 
-        for (int i = 0; i < amounts.length; i++) {
+        for (int i = 0; i < entries; i++) {
             var amount = amounts[i];
             AEKey key = AEKey.fromTagGeneric(registries, tags.getCompound(i));
 
@@ -312,10 +320,13 @@ public class DISKCellInventory implements StorageCell {
                 corruptedTag = true;
             } else {
                 storedAmounts.put(key, amount);
+                diskStorage.indexKey(key, i);
             }
         }
 
         if (corruptedTag) {
+            // Rewriting the stored form also drops the entries that could not be read.
+            diskStorage.invalidateKeyIndex();
             this.saveChanges();
         }
     }
@@ -328,6 +339,20 @@ public class DISKCellInventory implements StorageCell {
             this.storedItemCount += storedAmount;
         }
 
+        this.markChanged();
+    }
+
+    /**
+     * Updates the cached counters with a known delta instead of walking the whole map, then marks the cell as changed.
+     */
+    private void saveChanges(long itemCountDelta) {
+        this.storedItems = this.storedAmounts.size();
+        this.storedItemCount += itemCountDelta;
+
+        this.markChanged();
+    }
+
+    private void markChanged() {
         this.isPersisted = false;
         if (this.container != null) {
             this.container.saveChanges();
@@ -388,7 +413,7 @@ public class DISKCellInventory implements StorageCell {
 
         if (mode == Actionable.MODULATE) {
             getCellItems().put(what, currentAmount + amount);
-            this.saveChanges();
+            this.saveChanges(amount);
         }
 
         return amount;
@@ -409,14 +434,14 @@ public class DISKCellInventory implements StorageCell {
             if (extractAmount >= currentAmount) {
                 if (mode == Actionable.MODULATE) {
                     getCellItems().remove(what, currentAmount);
-                    this.saveChanges();
+                    this.saveChanges(-currentAmount);
                 }
 
                 return currentAmount;
             } else {
                 if (mode == Actionable.MODULATE) {
                     getCellItems().put(what, currentAmount - extractAmount);
-                    this.saveChanges();
+                    this.saveChanges(-extractAmount);
                 }
 
                 return extractAmount;

@@ -38,9 +38,10 @@ public interface IDISKCellItem extends ICellWorkbenchItem {
      * @return true to preventAdditionOfItem
      */
     default boolean isBlackListed(ItemStack cellItem, AEKey requestedAddition) {
-        if (((AEItemKey) requestedAddition).getItem() instanceof IBasicCellItem) {
-            return BasicCellHandler.INSTANCE.getCellInventory(((AEItemKey) requestedAddition).toStack(), null)
-                    .getUsedBytes() > 0;
+        // Only item keys can be cell items, and not every one of them actually has a cell inventory.
+        if (requestedAddition instanceof AEItemKey itemKey && itemKey.getItem() instanceof IBasicCellItem) {
+            var inventory = BasicCellHandler.INSTANCE.getCellInventory(itemKey.toStack(), null);
+            return inventory != null && inventory.getUsedBytes() > 0;
         }
         return false;
     }

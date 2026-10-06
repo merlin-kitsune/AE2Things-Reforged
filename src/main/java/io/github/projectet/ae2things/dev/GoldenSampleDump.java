@@ -79,6 +79,9 @@ public final class GoldenSampleDump {
     private static final int CELL_BIG_KEY_COUNT = 32;
     private static final int TIMING_KEY_COUNT = 32;
     private static final int ZERO_OP_COUNT = 2000;
+    private static final int PERSIST_OP_COUNT = 500;
+    private static final int WARMUP_OP_COUNT = 500;
+    private static final long PROBE_DELTA = 7L;
     private static final int ENCODE_TIMING_KEYS = 256;
 
     private static final String DATA_KEYS = "keys";
@@ -460,18 +463,77 @@ public final class GoldenSampleDump {
                 inventory.insert(keys.get(i), amounts[i], Actionable.MODULATE, null);
             }
             var existing = keys.get(0);
+            // Warm the JIT and the DFU codecs up first, otherwise the first timed row pays the warm-up cost and the
+            // later rows look several times faster for doing exactly the same work.
+            for (var i = 0; i < WARMUP_OP_COUNT; i++) {
+                inventory.insert(existing, 0L, Actionable.MODULATE, null);
+            }
             var start = System.nanoTime();
             for (var i = 0; i < ZERO_OP_COUNT; i++) {
                 inventory.insert(existing, 0L, Actionable.MODULATE, null);
             }
             timing.add("zero_insert_" + ZERO_OP_COUNT + "_existing_key_ms: "
                     + ((System.nanoTime() - start) / 1000000L));
+            for (var i = 0; i < WARMUP_OP_COUNT; i++) {
+                inventory.extract(existing, 0L, Actionable.MODULATE, null);
+            }
             var start2 = System.nanoTime();
             for (var i = 0; i < ZERO_OP_COUNT; i++) {
                 inventory.extract(existing, 0L, Actionable.MODULATE, null);
             }
             timing.add("zero_extract_" + ZERO_OP_COUNT + "_existing_key_ms: "
                     + ((System.nanoTime() - start2) / 1000000L));
+            // Each of these saves changes the amount of a key that is already stored, so the upstream build
+            // re-encodes all TIMING_KEY_COUNT keys and rebuilds the tag list on every save. The reforged build
+            // only writes one long into the existing amounts array.
+            // The warm-up pairs cancel out so every row starts and ends on the same amounts.
+            for (var i = 0; i < WARMUP_OP_COUNT; i++) {
+                inventory.insert(existing, 1L, Actionable.MODULATE, null);
+            }
+            for (var i = 0; i < WARMUP_OP_COUNT; i++) {
+                inventory.extract(existing, 1L, Actionable.MODULATE, null);
+            }
+            var start3 = System.nanoTime();
+            for (var i = 0; i < PERSIST_OP_COUNT; i++) {
+                inventory.insert(existing, 1L, Actionable.MODULATE, null);
+            }
+            timing.add("incremental_insert_" + PERSIST_OP_COUNT + "_saves_on_" + TIMING_KEY_COUNT + "_key_disk_ms: "
+                    + ((System.nanoTime() - start3) / 1000000L));
+            for (var i = 0; i < WARMUP_OP_COUNT; i++) {
+                inventory.extract(existing, 1L, Actionable.MODULATE, null);
+            }
+            for (var i = 0; i < WARMUP_OP_COUNT; i++) {
+                inventory.insert(existing, 1L, Actionable.MODULATE, null);
+            }
+            var start4 = System.nanoTime();
+            for (var i = 0; i < PERSIST_OP_COUNT; i++) {
+                inventory.extract(existing, 1L, Actionable.MODULATE, null);
+            }
+            timing.add("incremental_extract_" + PERSIST_OP_COUNT + "_saves_on_" + TIMING_KEY_COUNT + "_key_disk_ms: "
+                    + ((System.nanoTime() - start4) / 1000000L));
+            var disk = this.manager.getOrCreateDisk(uuid);
+            var amountSum = 0L;
+            for (var amount : disk.stackAmounts) {
+                amountSum += amount;
+            }
+            lines.add("disk_item_count_matches_cell: " + (disk.itemCount == inventory.getNbtItemCount()));
+            lines.add("disk_amount_sum_matches_cell: " + (amountSum == inventory.getStoredItemCount()));
+            lines.add("disk_key_count_matches_cell: " + (disk.stackAmounts.length == inventory.getStoredItemTypes()));
+            // Recorded (and therefore manifest-checked) probe of the in-place amounts update: an asymmetric change to a
+            // key that is already stored takes the in-place amounts path in the reforged build and a full re-encode
+            // plus
+            // rebuild in the upstream build, so the recorded per-key amounts only match when both land the new amount
+            // in
+            // the slot that actually belongs to that key.
+            inventory.insert(existing, PROBE_DELTA, Actionable.MODULATE, null);
+            var probeDisk = this.manager.getOrCreateDisk(uuid);
+            var probeLines = new ArrayList<String>();
+            probeLines.add("disk_item_count: " + probeDisk.itemCount);
+            probeLines.add("cell_item_count: " + inventory.getNbtItemCount());
+            probeLines.add("cell_types: " + inventory.getStoredItemTypes());
+            probeLines.add("disk_key_count: " + probeDisk.stackAmounts.length);
+            probeLines.addAll(this.contentLines(probeDisk.stackKeys, probeDisk.stackAmounts));
+            this.writeText("incremental_probe.txt", probeLines);
         } finally {
             this.manager.removeDisk(uuid);
         }

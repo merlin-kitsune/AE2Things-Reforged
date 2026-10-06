@@ -88,7 +88,9 @@ public class DISKDrive extends Item implements IDISKCellItem, AEToolItem {
             // Clone the disk if we can (this does not work in MP)
             var storageManager = AE2Things.currentStorageManager();
             if (storageManager != null) {
-                DataStorage storage = storageManager.getOrCreateDisk(diskId);
+                // The contents have to be copied as well: sharing the storage instance would make both disks change
+                // whenever one of them is written to.
+                DataStorage storage = storageManager.getOrCreateDisk(diskId).copy();
                 newStack.set(AE2Things.DATA_DISK_ITEM_COUNT, storage.itemCount);
                 storageManager.updateDisk(id, storage);
             } else {
@@ -166,7 +168,7 @@ public class DISKDrive extends Item implements IDISKCellItem, AEToolItem {
     @Override
     public void appendHoverText(ItemStack stack, TooltipContext context, List<Component> tooltip,
             TooltipFlag tooltipFlag) {
-        tooltip.add(Component.literal("Deep Item Storage disK - Storage for dummies")
+        tooltip.add(Component.translatable("text.ae2things.disk_drive_description")
                 .withStyle(ChatFormatting.DARK_GRAY, ChatFormatting.ITALIC));
         addCellInformationToTooltip(stack, tooltip);
     }

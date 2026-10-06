@@ -6,6 +6,8 @@
   "item.ae2things.disk_drive_256k": "256k ME DISK Drive",
   "item.ae2things.disk_housing": "ME DISK Housing",
   "text.ae2things.disk_drives": "ME DISK Drives",
+  "text.ae2things.disk_uuid": "Disk UUID: ",
+  "text.ae2things.disk_drive_description": "Deep Item Storage disK - Storage for dummies",
   "command.ae2things.recover_success": "%s has recovered a DISK Drive with the UUID of [%s].",
   "command.ae2things.recover_fail": "Failed to recover DISK Drive: UUID [%s] does not exist.",
   "command.ae2things.getuuid_success": "UUID of given DISK is: [%s]",

@@ -57,6 +57,9 @@ public class StorageManager extends SavedData {
     }
 
     public void updateDisk(UUID uuid, DataStorage dataStorage) {
+        if (dataStorage == DataStorage.EMPTY) {
+            throw new IllegalArgumentException("Cannot store the shared DataStorage.EMPTY sentinel for disk " + uuid);
+        }
         disks.put(uuid, dataStorage);
         setDirty();
     }
@@ -80,6 +83,11 @@ public class StorageManager extends SavedData {
     public void modifyDisk(UUID diskID, ListTag stackKeys, long[] stackAmounts, long itemCount) {
         DataStorage diskToModify = getOrCreateDisk(diskID);
         if (stackKeys != null && stackAmounts != null) {
+            if (stackKeys != diskToModify.stackKeys || stackAmounts != diskToModify.stackAmounts) {
+                // The cached key index belongs to the lists that are being replaced, and an index that still points
+                // at the old slot layout would make the next in-place amounts update write into the wrong slot.
+                diskToModify.invalidateKeyIndex();
+            }
             diskToModify.stackKeys = stackKeys;
             diskToModify.stackAmounts = stackAmounts;
         }

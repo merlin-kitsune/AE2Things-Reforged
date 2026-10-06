@@ -1,11 +1,10 @@
 plugins {
     id 'maven-publish'
     id 'net.neoforged.moddev' version '2.0.15-beta'
-    id 'com.matthewprenger.cursegradle' version '1.4.0'
     id 'com.diffplug.spotless' version '6.25.0'
 }
 
-group = "dev.technici4n"
+group = "io.github.merlin-kitsune"
 version = System.getenv("AE2THINGS_VERSION") ?: "0.0.0"
 
 repositories {
@@ -59,6 +58,9 @@ jar {
                 "Implementation-Version": version
         )
     }
+
+    // The golden sample dump harness is a development tool and must not be shipped in a release jar.
+    exclude("io/github/projectet/ae2things/dev/**")
 }
 
 neoForge {
