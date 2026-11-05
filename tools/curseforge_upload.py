@@ -38,6 +38,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 
 API = "https://minecraft.curseforge.com/api"
 CORE_API = "https://api.curseforge.com/v1"
@@ -133,13 +134,28 @@ def resolve_game_versions(token, mc, loader):
 
 
 def upload_file(token, project, jar, metadata):
-    status, body = curl([
-        "-X", "POST", "-H", "X-Api-Token: " + token,
-        "-F", "metadata=" + json.dumps(metadata, ensure_ascii=False),
-        "-F", "file=@" + jar + ";type=application/java-archive",
-        "-w", "\n%{http_code}",
-        "%s/projects/%s/upload-file" % (API, project),
-    ])
+    """POST the jar and its metadata.
+
+    The metadata JSON goes through a FILE (-F "metadata=<file"): passing it inline makes
+    curl treat ";" and friends as form-field syntax, and CurseForge then answers
+    {"errorCode":1002,"errorMessage":"Error in field `metadata`: Invalid JSON."}
+    """
+    handle, path = tempfile.mkstemp(suffix=".json", prefix="cf-meta-")
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as fh:
+            json.dump(metadata, fh, ensure_ascii=False)
+        status, body = curl([
+            "-X", "POST", "-H", "X-Api-Token: " + token,
+            "-F", "metadata=<" + path,
+            "-F", "file=@" + jar + ";type=application/java-archive",
+            "-w", "\n%{http_code}",
+            "%s/projects/%s/upload-file" % (API, project),
+        ])
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
     return status, body
 
 
