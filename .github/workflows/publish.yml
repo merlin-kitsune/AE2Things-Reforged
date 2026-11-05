@@ -1,34 +1,46 @@
 name: Publish
 
-# Release tags are namespaced by line, because each line has its own version number:
-#   forge-<version>     -> the Forge 1.20.1 line   (for example "forge-1.3.0")
-#   <version>           -> the NeoForge 1.21.1 line (the historical form, e.g. "1.4.3")
+# One tag per line, because each line keeps its own version number:
+#   forge-<version>     -> the Forge 1.20.1 line   (for example "forge-1.3.1")
+#   <version>           -> the NeoForge 1.21.1 line (the historical form, e.g. "1.4.5")
 #   neoforge-<version>  -> the NeoForge 1.21.1 line (explicit form)
-# The uploaded asset is always AE2-Things-<version>.jar, with the line prefix stripped from the tag.
+#
+# A tag push builds that line and publishes a release with the jar attached.
+# "Immutable releases" was turned off for this repository on 2026-11-05: while it was on,
+# any release created there burned its tag name permanently (the API then answers
+# "tag_name was used by an immutable release" forever, even after deleting the tag), which
+# is why "1.4.4" and "forge-1.3.0" can never be used again.
+# The jar that is attached here is built by CI; to ship the locally built and in-game
+# tested artifact instead, replace it afterwards:
+#
+#   gh release upload <tag> <jar> --clobber
 on:
-  release:
-    types:
-      - published
+  push:
+    tags:
+      - "*"
+  workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: publish-${{ github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   publish-neoforge:
     name: Publish NeoForge 1.21.1
-    if: ${{ ! startsWith(github.event.release.tag_name, 'forge-') }}
+    if: ${{ ! startsWith(github.ref_name, 'forge-') }}
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.ref_name }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@v6
       - name: Resolve version from tag
-        run: |
-          VERSION="${TAG#neoforge-}"
-          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
-        env:
-          TAG: ${{ github.event.release.tag_name }}
+        run: echo "VERSION=${TAG#neoforge-}" >> "$GITHUB_ENV"
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
       - name: Set up JDK 21
@@ -40,16 +52,28 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
       - name: Build
         run: ./gradlew build -Pmod_version="$VERSION"
-      - name: Upload Release Artifact
-        run: gh release upload "$TAG" "./build/libs/AE2-Things-$VERSION.jar" --clobber
+      - name: Publish the release with the jar
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          JAR="./build/libs/AE2-Things-${VERSION}.jar"
+          NOTES="${GITHUB_WORKSPACE}/docs/curseforge/CHANGELOG-${VERSION}.md"
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "release ${TAG} already exists, replacing the asset"
+            gh release upload "${TAG}" "${JAR}" --clobber
+          else
+            args=(--target "${GITHUB_SHA}" --title "AE2 Things Reforged ${VERSION} (NeoForge 1.21.1)")
+            if [ -f "${NOTES}" ]; then args+=(--notes-file "${NOTES}"); else args+=(--generate-notes); fi
+            gh release create "${TAG}" "${JAR}" "${args[@]}"
+          fi
 
   publish-forge:
     name: Publish Forge 1.20.1
-    if: ${{ startsWith(github.event.release.tag_name, 'forge-') }}
+    if: ${{ startsWith(github.ref_name, 'forge-') }}
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.ref_name }}
     defaults:
       run:
         working-directory: forge-1.20.1
@@ -57,11 +81,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
       - name: Resolve version from tag
-        run: |
-          VERSION="${TAG#forge-}"
-          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
-        env:
-          TAG: ${{ github.event.release.tag_name }}
+        working-directory: .
+        run: echo "VERSION=${TAG#forge-}" >> "$GITHUB_ENV"
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
       - name: Set up JDK 17
@@ -73,8 +94,18 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
       - name: Build
         run: ./gradlew build -Pmod_version="$VERSION"
-      - name: Upload Release Artifact
-        run: gh release upload "$TAG" "./build/libs/AE2-Things-$VERSION.jar" --clobber
+      - name: Publish the release with the jar
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          JAR="./build/libs/AE2-Things-${VERSION}.jar"
+          NOTES="${GITHUB_WORKSPACE}/docs/curseforge/CHANGELOG-${VERSION}.md"
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "release ${TAG} already exists, replacing the asset"
+            gh release upload "${TAG}" "${JAR}" --clobber
+          else
+            args=(--target "${GITHUB_SHA}" --title "AE2 Things Reforged ${VERSION} (Forge 1.20.1)")
+            if [ -f "${NOTES}" ]; then args+=(--notes-file "${NOTES}"); else args+=(--generate-notes); fi
+            gh release create "${TAG}" "${JAR}" "${args[@]}"
+          fi

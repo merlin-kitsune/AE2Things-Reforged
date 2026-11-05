@@ -1,6 +1,8 @@
-## AE2 Things Reforged 1.4.4 — Minecraft 1.21.1 / NeoForge
+## AE2 Things Reforged 1.4.5 — Minecraft 1.21.1 / NeoForge
 
 Requires NeoForge 21.1.248+ and AE2 19.2.18 – 19.x. Java 21. Drop-in replacement for the same-version upstream AE2 Things.
+
+Note on the version number: this build is the contents of 1.4.4, bumped to 1.4.5 only because GitHub refused to reuse the release tag `1.4.4`. Same code, same jar layout.
 
 ### Fixed
 

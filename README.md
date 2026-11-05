@@ -10,8 +10,8 @@ performance overhead that large networks used to cause.
 
 | Minecraft | Loader | Mod version | Requires | Jar |
 |---|---|---|---|---|
-| 1.21.1 | NeoForge 21.1.248+ | **1.4.4** | AE2 19.2.18+ (below 20) | `AE2-Things-1.4.4.jar` |
-| 1.20.1 | Forge 47.1.47+ | **1.3.0** | AE2 15.4.12+ (below 16) | `AE2-Things-1.3.0.jar` |
+| 1.21.1 | NeoForge 21.1.248+ | **1.4.5** | AE2 19.2.18+ (below 20) | `AE2-Things-1.4.5.jar` |
+| 1.20.1 | Forge 47.1.47+ | **1.3.1** | AE2 15.4.12+ (below 16) | `AE2-Things-1.3.1.jar` |
 
 Both lines keep `modId=ae2things`, the same block/item ids and the same save format as the upstream release of
 their own Minecraft version, so they are drop-in replacements — existing worlds keep working.
@@ -102,5 +102,5 @@ AE2 Things Reforged 是 [AE2 Things](https://github.com/Technici4n/AE2Things-For
   UUID、拆盘清理侧表、服务端表不可用时拒绝写入。
 - **兼容**：与 AE2 MEGA Things 保持二进制级兼容（1.20.1 已实机联合启动验证，1.21.1 已逐条核对符号与注入点）。
 
-版本对应：**1.21.1 NeoForge = 1.4.4**（需 AE2 19.2.18+、Java 21），**1.20.1 Forge = 1.3.0**（需 AE2 15.4.12+、
+版本对应：**1.21.1 NeoForge = 1.4.5**（需 AE2 19.2.18+、Java 21），**1.20.1 Forge = 1.3.1**（需 AE2 15.4.12+、
 Java 17）。同 modId、同存档格式，可直接替换上游版本。

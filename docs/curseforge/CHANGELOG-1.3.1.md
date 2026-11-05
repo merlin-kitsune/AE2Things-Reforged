@@ -1,8 +1,10 @@
-## AE2 Things Reforged 1.3.0 — Minecraft 1.20.1 / Forge
+## AE2 Things Reforged 1.3.1 — Minecraft 1.20.1 / Forge
 
 First release of the 1.20.1 Forge line. Requires Forge 47.1.47+ and AE2 15.4.12 – 15.x. Java 17.
 
 This is the full 1.21.1 feature set ported to 1.20.1, including every performance fix and bug fix of the fork, with the GUI still using the classic 1.20.1 assets (AE2 redrew all of them in 1.21.1).
+
+Note on the version number: the port was built and tested as 1.3.0, then bumped to 1.3.1 only because GitHub refused to reuse the release tag. Same code.
 
 ### Features
 
