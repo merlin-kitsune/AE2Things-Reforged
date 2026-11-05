@@ -1,0 +1,79 @@
+name: CurseForge
+
+# Uploads a built jar to CurseForge through the legacy upload API.
+#
+# It runs on GitHub-hosted runners on purpose: CurseForge sits behind a Cloudflare
+# bot check that answers "403 Just a moment..." to this project's local network, while
+# runner traffic is accepted.
+#
+#   gh workflow run curseforge.yml -f line=neoforge
+#   gh workflow run curseforge.yml -f line=forge -f description=true
+on:
+  workflow_dispatch:
+    inputs:
+      line:
+        description: Which line to upload
+        type: choice
+        options: [neoforge, forge]
+        default: neoforge
+      description:
+        description: Also push docs/curseforge/DESCRIPTION.html as the project page
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    env:
+      CURSEFORGE_TOKEN: ${{ secrets.CURSEFORGE_TOKEN }}
+      CURSEFORGE_PROJECT: "1729932"
+    steps:
+      - uses: actions/checkout@v7
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew forge-1.20.1/gradlew
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: zulu
+          java-version: 21
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+      - name: Build the NeoForge line
+        if: ${{ inputs.line == 'neoforge' }}
+        run: ./gradlew build
+      - name: Upload the NeoForge line
+        if: ${{ inputs.line == 'neoforge' }}
+        run: |
+          set -euo pipefail
+          VERSION="$(grep -E '^mod_version=' gradle.properties | cut -d= -f2)"
+          python3 tools/curseforge_upload.py --project "$CURSEFORGE_PROJECT" \
+            --file "build/libs/AE2-Things-${VERSION}.jar" --mc 1.21.1 --loader neoforge \
+            --changelog-file "docs/curseforge/CHANGELOG-${VERSION}.md" \
+            --display-name "AE2 Things Reforged ${VERSION} (NeoForge 1.21.1)"
+      - name: Set up JDK 17
+        if: ${{ inputs.line == 'forge' }}
+        uses: actions/setup-java@v6
+        with:
+          distribution: zulu
+          java-version: 17
+      - name: Build the Forge line
+        if: ${{ inputs.line == 'forge' }}
+        working-directory: forge-1.20.1
+        run: ./gradlew build
+      - name: Upload the Forge line
+        if: ${{ inputs.line == 'forge' }}
+        run: |
+          set -euo pipefail
+          VERSION="$(grep -E '^mod_version=' forge-1.20.1/gradle.properties | cut -d= -f2)"
+          python3 tools/curseforge_upload.py --project "$CURSEFORGE_PROJECT" \
+            --file "forge-1.20.1/build/libs/AE2-Things-${VERSION}.jar" --mc 1.20.1 --loader forge \
+            --changelog-file "docs/curseforge/CHANGELOG-${VERSION}.md" \
+            --display-name "AE2 Things Reforged ${VERSION} (Forge 1.20.1)"
+      - name: Push the project page description
+        if: ${{ inputs.description }}
+        run: |
+          python3 tools/curseforge_upload.py --project "$CURSEFORGE_PROJECT" \
+            --description-file docs/curseforge/DESCRIPTION.html
