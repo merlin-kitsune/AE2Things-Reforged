@@ -432,3 +432,39 @@ cd forge-1.20.1 && ./gradlew runClient
 ```
 
 两线自测均已完成并通过，自测代码、`AE2Things` / `AE2ThingsClient` 的 hook、`build.gradle` 里的两处 TEMPORARY 均已移除（`git status` 干净）。
+## 18. AE2 MEGA Things 兼容性复核（2026-11-05，1.21.1 线 2.0.4 + 1.20.1 线 1.0.8）
+
+用户要求「拉取 AE2 MEGA Things 项目，验证我们模组是否与该模组仍然保持兼容」。1.20.1 线已用**真实 Forge 服务端运行取证**（见 §6 与 `MEGA-COMPAT.md`）；1.21.1 线（本轮把共享修复回灌后）用**字节码契约核对**对 `AE2MEGAThings-1.21.1-2.0.4.jar` 复核，结论：**仍然兼容，无破坏**。
+
+### 18.1 符号契约（17 项全部满足）
+
+对 MEGA 2.0.4 全 jar 做 `javap -p -c` 扫描，抽出它对 `io.github.projectet.ae2things.*` 的 17 个成员引用，逐条在我们 `AE2-Things-1.4.4.jar` 上核对描述符：
+
+| 成员 | 结果 |
+|---|---|
+| `AE2Things.DATA_DISK_ID` / `DATA_DISK_ITEM_COUNT` / `DATA_FUZZY_MODE`（`DataComponentType`） | 存在 |
+| `AE2Things.currentStorageManager()L…StorageManager;` | 存在 |
+| `AETItems.DISK_DRIVE_256K`（`DeferredItem`） | 存在 |
+| `DISKCellHandler.INSTANCE` / `<init>()V` / `getCellInventory(ItemStack,ISaveProvider)L…DISKCellInventory;` | 存在 |
+| `DISKCellInventory.<init>(IDISKCellItem,ItemStack,ISaveProvider,StorageManager)V` | 存在 |
+| `DISKCellInventory.getNbtItemCount()J` / `getStoredItemCount()J` | 存在 |
+| `DISKCellInventory.getAvailableStacks()Lappeng/api/stacks/KeyCounter;` | 由 AE2 19.2.18 的 `MEStorage` 默认方法继承提供（`MEStorage` 同时有 `void getAvailableStacks(KeyCounter)` 与我们覆写的那个版本不冲突） |
+| `IDISKCellItem.getKeyType()Lappeng/api/stacks/AEKeyType;` | 存在 |
+| `DataStorage.itemCount:J` | 存在 |
+| `StorageManager.hasUUID(UUID)Z` / `getOrCreateDisk(UUID)DataStorage` / `updateDisk(UUID,DataStorage)V` | 存在 |
+
+### 18.2 三个 mixin 注入点（逐条按字节码核对）
+
+| MEGA 注入 | 目标 | 我们的现状 |
+|---|---|---|
+| `MixinDISKCellInventory`（`@ModifyExpressionValue`） | `DISKCellInventory.insert` 里**唯一一处** `IDISKCellItem.isBlackListed(ItemStack,AEKey)Z` | `insert` 方法体内 `isBlackListed` 命中数 = **1**（回灌时特意保持，不抽成 helper） |
+| `MixinDISKCellHandler`（`@ModifyExpressionValue`） | `addCellInformationToTooltip` 里对 **静态** `DISKCellInventory.createInventory(...)` 的调用 | 该方法体内 `createInventory` 命中 = **1**、`getCellInventory` 命中 = **0** |
+| `MixinAE2ThingsCommand`（`@ModifyConstant`, `method="lambda$help$3"`, `ordinal=0`） | `Command.help()` 第 3 个 lambda 里**唯一一处**含 `<UUID>` 的字符串常量 | `lambda$help$3` 含 `<UUID>` 常量数 = **1**（另两个 help lambda 为 0） |
+
+版本门禁：MEGA 2.0.4 的 `neoforge.mods.toml` 对 `ae2things` 声明 `versionRange="[1.2,)"`、REQUIRED/AFTER/BOTH ⇒ **1.4.4 通过**。
+
+> 注意两线**故意不同**、不要「统一」：1.21.1 的 MEGA 2.x 自己 mixin 了静态 `createInventory`，所以我们 tooltip 走静态工厂；1.20.1 的 MEGA 1.0.8 没有这个 patch，所以我们 tooltip 要走**虚调用** `getCellInventory`（MEGA 的 `AE2MTDISKCellHandler` 覆写才能生效，否则 tooltip 显示基类数字）。
+
+### 18.3 未做（唯一缺口，如实说明）
+
+1.21.1 的 MEGA **运行时**联合启动没有在本机做：dev 环境是 named 映射，MEGA 是 SRG 重映射产物，在 dev 里 mixin 目标名对不上会得到**假阴性**，无法区分「真破坏」与「映射差异」（同一理由已在 1.20.1 线采用真实 Forge 服务端取证）。替代证据：① 上述字节码契约全部满足；② 该 MEGA 版本已在整合包生产环境与本 fork 1.4.3 长期共存（同 modId、同符号面，1.4.4 只改了内部实现与注入点周边，未改符号面）；③ 本轮 1.4.4 对 `insert` / `addCellInformationToTooltip` / `help()` 的结构改动均已按上表逐个核对。
