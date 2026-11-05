@@ -1,0 +1,25 @@
+name: CFProbe
+# Temporary diagnostic: what do the legacy CurseForge upload endpoints actually answer?
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    env:
+      T: ${{ secrets.CURSEFORGE_TOKEN }}
+    steps:
+      - name: Probe
+        run: |
+          set -u
+          for host in https://minecraft.curseforge.com https://www.curseforge.com https://legacy-api.curseforge.com; do
+            echo "=== ${host} GET /api/game/versions"
+            curl -sS -o /tmp/b1 -D /tmp/h1 -w 'code=%{http_code} redirect=%{redirect_url}\n' -H "X-Api-Token: $T" "$host/api/game/versions"
+            head -3 /tmp/h1 | tr -d '\r'
+            head -c 120 /tmp/b1; echo
+            echo "=== ${host} POST /api/projects/1729932/uploadFile (empty multipart)"
+            curl -sS -o /tmp/b2 -D /tmp/h2 -w 'code=%{http_code} redirect=%{redirect_url}\n' -X POST -H "X-Api-Token: $T" -F "metadata={}" -F "file=@/etc/hostname;filename=x.jar" "$host/api/projects/1729932/uploadFile"
+            head -3 /tmp/h2 | tr -d '\r'
+            head -c 300 /tmp/b2; echo
+          done
