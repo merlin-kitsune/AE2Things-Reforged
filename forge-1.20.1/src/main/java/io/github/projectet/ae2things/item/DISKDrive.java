@@ -7,7 +7,6 @@ import java.util.List;
 import org.jetbrains.annotations.Nullable;
 
 import io.github.projectet.ae2things.AE2Things;
-import io.github.projectet.ae2things.storage.DISKCellHandler;
 import io.github.projectet.ae2things.storage.DISKCellInventory;
 import io.github.projectet.ae2things.storage.IDISKCellItem;
 import io.github.projectet.ae2things.util.Constants;
@@ -28,7 +27,6 @@ import net.minecraft.world.level.Level;
 
 import appeng.api.config.FuzzyMode;
 import appeng.api.stacks.AEKeyType;
-import appeng.api.storage.cells.CellState;
 import appeng.api.upgrades.IUpgradeInventory;
 import appeng.api.upgrades.UpgradeInventories;
 import appeng.hooks.AEToolItem;
@@ -163,9 +161,9 @@ public class DISKDrive extends Item implements IDISKCellItem, AEToolItem {
 
     public static int getColor(ItemStack stack, int tintIndex) {
         if (tintIndex == 1) {
-            // Determine LED color
-            var cellInv = DISKCellHandler.INSTANCE.getCellInventory(stack, null);
-            var cellStatus = cellInv != null ? cellInv.getClientStatus() : CellState.EMPTY;
+            // Determine LED color. Reads the item NBT directly: this runs once per rendered layer per frame, so
+            // building a cell inventory (and with it the cell config) here would cost far more than the whole feature.
+            var cellStatus = DISKCellInventory.getClientStatus(stack);
             // AE2 state colors carry no alpha channel, so the LED has to be made opaque here.
             return cellStatus.getStateColor() | 0xFF000000;
         } else {

@@ -56,8 +56,9 @@ public class DataStorage {
     }
 
     /**
-     * Creates an independent copy of this storage, so that writing to one of the two does not affect the other. The
-     * individual key tags are immutable and may be shared, but the list, the amounts and the item count may not.
+     * Creates an independent copy of this storage, so that writing to one of the two does not affect the other. The key
+     * tags are deep-copied as well: they are the very instances that the side table serialises, so sharing them would
+     * make any future in-place edit corrupt the clone, the source and the file at the same time.
      */
     public DataStorage copy() {
         if (this == EMPTY) {
@@ -66,7 +67,7 @@ public class DataStorage {
 
         var keys = new ListTag();
         for (int i = 0; i < this.stackKeys.size(); i++) {
-            keys.add(this.stackKeys.getCompound(i));
+            keys.add(this.stackKeys.getCompound(i).copy());
         }
         return new DataStorage(keys, this.stackAmounts.clone(), this.itemCount);
     }

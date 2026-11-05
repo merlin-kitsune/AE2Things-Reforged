@@ -11,9 +11,9 @@
 | AE2 | **15.4.12**（1.20.1 Forge 最新），由 `gradle.properties: ae2_version_id=QRpVsqDI` 锁定（Modrinth 上 15.4.12 的**默认文件是 Fabric jar**，必须用版本 id 才能拿到 Forge jar） |
 | Forge API | **47.1.47**（AE2 15.4.12 自身编译所用版本），对用户声明下限 47.1.3 |
 | 版本号 | **1.3.0**（jar 名 `AE2-Things-1.3.0.jar`，manifest `Implementation-Version: 1.3.0`） |
-| 构建 | 通过（BUILD SUCCESSFUL），103 entries，80,028 B |
+| 构建 | 通过（`spotlessCheck` + `build`），103 entries，80,454 B，sha256 `27488cd1902a6f1530d91e8a354ff335a8a0501c41a0902077de28cca9bae102` |
 | 开发服启动 | 通过：mod 容器创建、mixin 注入 `AbstractContainerMenu` 成功、数据包加载无报错 |
-| 提交 | **未提交**（等实机指令） |
+| 提交 | 本地三次提交：`06d4b40`（移植）/ `613bd18`（persist 铸锚补漏）/ 复核修复批次（`git log -1`，见 §13）；**未推送**，等实机指令 |
 
 ## 2. 目录与构建
 
@@ -254,3 +254,40 @@ cd F:/MCProject/ae2things-reforged/forge-1.20.1
 ### 12.3 复核保留但本次不改的项（P3/P4，均继承自上游）
 - P3：损坏数据触发的 `loadCellItems` 自修复会在「读」路径写盘（`DISKDrive.java:119-121` 入口），与 upstream 1.20.1 同形；要彻底消除需给 `DISKCellInventory` 加只读标志，属独立改动。
 - P4：`IDISKCellItem.java:100` 克隆时对源 id 用 `getOrCreateDisk`，源盘无记录时会顺手建一条空记录（写路径，影响可忽略）。
+
+## 13. 第二轮独立复核（3 major / 6 minor / 3 nit）的处置
+
+第二轮 read-only 复核（同一次 `code_review` 派生的独立 reader，全部结论带 `文件:行` 与 javap 证据）判定**无 blocker**，但列出 3 条 major / 6 条 minor / 3 条 nit。逐条处置如下（P1 = major，P2 = minor，P3 = nit）：
+
+| # | 复核结论 | 处置 | 落点 |
+|---|---|---|---|
+| P1-1 | 读档时丢弃的坏条目，会在下一次无关写入时被永久抹掉（`save()` 只序列化内存表） | **已修**：不可读条目原样保留并在 `save()` 末尾追加回去，文件不再丢字节 | `util/StorageManager.java`（`unreadable` 字段 + `save()` 的 `diskList.addAll(unreadable)` + `readNbt` 两条丢弃路径改为 `unreadable.add(disk)`，日志措辞由 Dropping 改为 Keeping…unreadable） |
+| P1-2 | CI 从不构建这条线；打 1.20.1 的 tag 会发布出一个 1.21.1 的 jar | **已修**：`build.yml` 拆成 NeoForge 1.21.1 / Forge 1.20.1 两个 job（后者 `working-directory: forge-1.20.1`、JDK 17）；`publish.yml` 按 tag 前缀门控（`forge-<ver>` 走 Forge 线，纯 `<ver>` 或 `neoforge-<ver>` 走 1.21.1 线），上传名统一 `AE2-Things-<ver>.jar` | `.github/workflows/build.yml`、`.github/workflows/publish.yml` |
+| P1-3 | `/ae2things recover` 能让两个活动盘共用一个 UUID（后写覆盖先写；空盘分支还会 `removeDisk` 并把另一张盘留在「有 UUID 无条目」） | **待裁决**：即 §9 的 F2，此处复核补了第四种方案（换新 UUID + 复制条目），见 13.2 | — |
+| P2-4 | `mixins.ae2things.json` 的 `"required": false`：注入失败只记日志，创造模式中键复制守护会静默消失 | **待裁决**（改成 `true` = 注入失败即启动失败，利弊见 13.2） | `src/main/resources/mixins.ae2things.json:2` |
+| P2-5 | `DISKCellInventory` 在构造期把 manager 存进 `final` 字段；`initServer()` 阶段加载的区块（出生点驱动器）会拿到 null manager 并显示为空 | **待裁决**：复核已验证会自愈（`onReady`/`mountInventories`/`onChangeInventory` → `updateState()` 重建），惰性兜底属加固 | `storage/DISKCellInventory.java:64-67`、`:105-112` |
+| P2-6 | `extract()` 缺 `insert()` 那样的 `storageManager == null` 守卫（今日不可达，纯不对称） | **已修**：MODULATE 且无 manager 时返回 0 | `storage/DISKCellInventory.java` `extract()` 开头 |
+| P2-7 | `DataStorage.copy()` 共享每个 key 的 `CompoundTag`（靠「没人原地改 tag」的隐含不变量） | **已修**：逐条 `getCompound(i).copy()` 深拷贝，javadoc 同步改写 | `util/DataStorage.java` `copy()` |
+| P2-8 | 铸 UUID 发生在 `amount <= 0` 裁剪之前，可能留下空条目（今日不可达） | **未改**：动 `insert()` 的语句顺序会触碰 MEGA 的注入点，收益为 0、风险非 0 | `storage/DISKCellInventory.java:457-475` |
+| P2-9 | `getColor` 与 tooltip 每次渲染都 new 一整个 `DISKCellInventory`（含 `CellConfig.create` 读 NBT） | **部分已修**：`getColor` 改走静态 `DISKCellInventory.getClientStatus(ItemStack)` + `getTotalBytes(ItemStack)`，路径上不再建 inventory；**tooltip 保留虚调用**，因为 MEGA 的工具提示依赖它（契约 R7） | `item/DISKDrive.java:164-175`、`storage/DISKCellInventory.java` |
+| P3-10 | `help()` 的 lambda 编号是 MEGA 的二进制契约，源码里没写 | **已修**：`help()` 上加 javadoc 明示 `lambda$help$3` 与 `<UUID>` 字面量不可动 | `command/Command.java` |
+| P3-11 | `recover` 走 `getOrCreateDisk` 而入口已由 `hasUUID` 把关 | **已修**：改 `getDisk(uuid)`（不建条目） | `command/Command.java:67-73` |
+| P3-12 | 本文档 §1 过期（写着未提交 / 80,028 B） | **已修**：§1 已更新为本轮实际状态 | 本文件 §1 |
+
+### 13.1 本轮的实测证据
+
+- **P1-1 的行为自测**（开发服，临时钩子，已删除）：构造 `disklist` = 1 条合法条目 + 1 条缺 `diskuuid` 的条目，`readNbt` → `save` 往返后输出 `[AE2T-DEBUG] retained entries=2 marker=keep-me uuidPresent=true`，同时日志有 `Keeping disk entry 1 from disk_manager unreadable: no usable diskuuid tag`。即坏条目被保留、好条目照常可读。
+- 自测代码删除后重建，jar 与自测前**逐字节相同**（`spotlessApply build` 后 80,454 B / 103 entries / sha256 `27488cd19…`），源码 `grep AE2T-DEBUG` 为空。
+- **联调服务端（7 个 jar：AE2 15.4.12 + GuideME + 本模组 + AE2 MEGA Things 1.0.8 + KotlinForForge + MegaCells + Cloth Config）**：`Done (1.282s)!`；RCON 执行 `ae2things`（裸命令即帮助）输出仍带 MEGA 改写的 `/ae2things recover <UUID> [DISK] … You can change the disk to be spawned by the given DISK.` ⇒ `@ModifyConstant(lambda$help$3, ordinal 0)` 契约在本轮改动后依然成立；`stop` 干净退出，全日志 `NoSuchMethod/NoSuchField/AbstractMethod/ClassNotFound/InjectionError` 计数为 0，唯一 ERROR 是 megacells 自己的 `loot_tables:megacells:blocks/mega_emc_interface` 解析失败（与本模组无关）。
+- **未验证项**：两个 workflow 的 YAML 没有在 CI 实跑过（本机无 yaml 解析器，也不想靠 `npx` 联网装）；首次推送后需要看一眼 Actions 是否按预期分 job。
+
+### 13.2 三个待裁决项（都需要你点头）
+
+1. **P1-3 / F2：`recover` 的语义怎么定**。复核给出第四种方案 **D：换新 UUID + 复制条目**（照 `IDISKCellItem.cloneDisk` 的写法：`copy()` 原条目 → `updateDisk(newId, copied)` → 写回物品 NBT，并在成功消息里报新 id）。
+   - D 的好处：从机制上**不可能**出现两盘共用一个 UUID，改动约 8 行，不需要登记表，也不会漏掉驱动器/箱子里的盘。
+   - D 的代价：`recover` 从「找回那张盘」变成「复制一张新盘」——原件还在时这就是一次物品复制（op only）。
+   - A（在线盘登记表 + 拒绝）仍是「不改语义、只挡误用」的唯一方案，代价 40–60 行 + 弱引用清理。
+   - 我的建议：**D**。理由是 oplist 本来就能用 `/give`、创造模式拿任何东西，「op 能复制」不是新增能力，而「静默清空一张真盘」是真正的事故。最终以你的裁决为准，两条线要一起定。
+2. **P2-4：mixin 的 `required`**。`true` = 注入点一旦解析失败就启动失败（吵闹但安全）；`false` = 只记一行日志，创造模式中键复制失去守护（静默出双盘）。1.21.1 线当前也是 `false`，要改就两条线一起改。我的建议：**改成 true**，注入目标已验证稳定（`@Slice` 命中 bci 1428 的 `hasItem`，其后唯一 `copyWithCount` 在 1449）。
+3. **P2-5：manager 惰性解析**。现在依赖 AE2 的 `updateState()` 在首 tick 自愈；加固做法是让 `currentStorageManager()` 在没有实例但有运行中服务端时惰性初始化。要改动 3 个文件，实机验证成本较高。我的建议：**先不动**，把「重启后出生点驱动器里的盘是否正常显示」列进实机验收清单，出问题再加固。
+

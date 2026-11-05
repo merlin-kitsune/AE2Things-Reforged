@@ -48,6 +48,12 @@ public class Command {
                     .executes(Command::getUUID))
             .build();
 
+    /**
+     * The position of the lambdas in this method is a binary contract with AE2 MEGA Things: its mixin rewrites the only
+     * string constant of {@code lambda$help$3} (the second line below) to add the {@code [DISK]} hint of its own
+     * argument. Adding a lambda earlier in this class, or moving the {@code <UUID>} literal, silently breaks that help
+     * text, so keep the literals exactly where they are (and keep them in English).
+     */
     private static int help(CommandContext<CommandSourceStack> context) {
         context.getSource().sendSuccess(() -> Component.literal("Available Argument(s): "), false);
         context.getSource().sendSuccess(() -> Component.literal(
@@ -67,8 +73,11 @@ public class Command {
         if (storageManager != null && storageManager.hasUUID(uuid)) {
             ItemStack stack = new ItemStack(AETItems.DISK_DRIVE_256K.get());
 
+            // Read-only lookup: the uuid was just proven to exist, so this must not be allowed to create an entry.
+            var diskData = storageManager.getDisk(uuid);
+
             DISKCellInventory.setDiskUUID(stack, uuid);
-            DISKCellInventory.setNbtItemCount(stack, storageManager.getOrCreateDisk(uuid).itemCount);
+            DISKCellInventory.setNbtItemCount(stack, diskData.itemCount);
 
             player.addItem(stack);
 

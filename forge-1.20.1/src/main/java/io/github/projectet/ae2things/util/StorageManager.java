@@ -1,6 +1,8 @@
 package io.github.projectet.ae2things.util;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -15,13 +17,21 @@ import appeng.core.AELog;
 public class StorageManager extends SavedData {
     private final Map<UUID, DataStorage> disks;
 
+    /**
+     * Entries that could not be read, kept verbatim so that saving the side table again does not erase them. Dropping
+     * them from memory would make the next unrelated disk write silently and permanently delete whatever they held.
+     */
+    private final List<CompoundTag> unreadable;
+
     public StorageManager() {
         disks = new HashMap<>();
+        unreadable = new ArrayList<>();
         this.setDirty();
     }
 
-    private StorageManager(Map<UUID, DataStorage> disks) {
+    private StorageManager(Map<UUID, DataStorage> disks, List<CompoundTag> unreadable) {
         this.disks = disks;
+        this.unreadable = unreadable;
         // The data was just read from disk, so it does not need to be written back until something actually changes.
         // Marking it dirty here made every world save rewrite the whole side table.
     }
@@ -37,12 +47,17 @@ public class StorageManager extends SavedData {
             diskList.add(disk);
         }
 
+        // Unreadable entries go back out exactly as they came in. They stay unusable until someone repairs them by
+        // hand, but the file keeps every byte the player ever had.
+        diskList.addAll(unreadable);
+
         nbt.put(Constants.DISKLIST, diskList);
         return nbt;
     }
 
     public static StorageManager readNbt(CompoundTag nbt) {
         Map<UUID, DataStorage> disks = new HashMap<>();
+        List<CompoundTag> unreadable = new ArrayList<>();
         ListTag diskList = nbt.getList(Constants.DISKLIST, CompoundTag.TAG_COMPOUND);
         for (int i = 0; i < diskList.size(); i++) {
             CompoundTag disk = diskList.getCompound(i);
@@ -51,8 +66,9 @@ public class StorageManager extends SavedData {
             // safe precondition: it checks presence, IntArrayTag type and length == 4 in one go.
             if (!disk.hasUUID(Constants.DISKUUID)) {
                 // An entry we cannot key is unreadable anyway, and storing a null key would kill the next save.
-                AELog.warn("Dropping disk entry %d from %s: no usable %s tag", i, Constants.MANAGER_NAME,
-                        Constants.DISKUUID);
+                AELog.warn("Keeping disk entry %d from %s unreadable: no usable %s tag", i,
+                        Constants.MANAGER_NAME, Constants.DISKUUID);
+                unreadable.add(disk);
                 continue;
             }
             // One corrupt entry must not cost us the whole side table: readNbt throwing would make the
@@ -60,10 +76,11 @@ public class StorageManager extends SavedData {
             try {
                 disks.put(disk.getUUID(Constants.DISKUUID), DataStorage.fromNbt(disk.getCompound(Constants.DISKDATA)));
             } catch (Exception e) {
-                AELog.warn("Dropping unreadable disk entry %d from %s: %s", i, Constants.MANAGER_NAME, e);
+                AELog.warn("Keeping disk entry %d from %s unreadable: %s", i, Constants.MANAGER_NAME, e);
+                unreadable.add(disk);
             }
         }
-        return new StorageManager(disks);
+        return new StorageManager(disks, unreadable);
     }
 
     public void updateDisk(UUID uuid, DataStorage dataStorage) {

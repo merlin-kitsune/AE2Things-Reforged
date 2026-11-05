@@ -158,10 +158,20 @@ public class DISKCellInventory implements StorageCell {
     }
 
     public CellState getClientStatus() {
-        if (this.getNbtItemCount() == 0) {
+        return getClientStatus(this.i);
+    }
+
+    /**
+     * Status that only reads the item NBT. Render paths (LED colour, tooltips) use this instead of building a whole
+     * cell inventory: that would read the cell config and parse the upgrade inventory once per rendered layer per
+     * frame.
+     */
+    public static CellState getClientStatus(ItemStack disk) {
+        var itemCount = getNbtItemCount(disk);
+        if (itemCount == 0) {
             return CellState.EMPTY;
         }
-        if ((getNbtItemCount() > 0 && getNbtItemCount() != getTotalBytes())) {
+        if (itemCount != getTotalBytes(disk)) {
             return CellState.NOT_EMPTY;
         }
         return CellState.FULL;
@@ -489,6 +499,12 @@ public class DISKCellInventory implements StorageCell {
             return 0;
         }
 
+        if (storageManager == null && mode == Actionable.MODULATE) {
+            // Symmetric with insert(): without a storage manager the extraction could never be persisted, so the
+            // contents would simply reappear the next time the slot is read.
+            return 0;
+        }
+
         // To avoid long-overflow on the extracting callers side
         var extractAmount = Math.min(Integer.MAX_VALUE, amount);
 
@@ -516,6 +532,13 @@ public class DISKCellInventory implements StorageCell {
 
     public long getTotalBytes() {
         return this.cellType.getBytes(this.i);
+    }
+
+    /**
+     * Capacity of a disk known only by its stack, for callers that must not build an inventory (render paths).
+     */
+    public static long getTotalBytes(ItemStack disk) {
+        return disk.getItem() instanceof IDISKCellItem cellType ? cellType.getBytes(disk) : 0;
     }
 
     public long getFreeBytes() {
