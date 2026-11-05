@@ -228,3 +228,29 @@ cd F:/MCProject/ae2things-reforged/forge-1.20.1
 - 1.21.1 线：根 `gradle.properties` 的 `mod_version=1.4.3`（与线上在用的 1.4.3 对齐），`build.gradle: version = mod_version`；CI 发版时用 `./gradlew build -Pmod_version=<tag>` 覆盖（`publish.yml` 已改）。
 - 1.20.1 线：`forge-1.20.1/gradle.properties` 的 `mod_version=1.3.0`（初版号），`forge-1.20.1/build.gradle: version = mod_version`。
 - 两条线各自升号，互不牵连；产物名分别是 `AE2-Things-1.4.3.jar` / `AE2-Things-1.3.0.jar`，`Implementation-Version` 与目录名一致（均已实测）。
+
+## 12. 独立复核（read-only reviewer，2026-11-05）
+
+对移植版的持久化修复做了独立复核：只读源码 + 对 merged jar 与编译产物 `javap -p -c` 逐条取证，不采信主会话自述。四个判据与结论：
+
+| 判据 | 结论 | 关键证据 |
+|---|---|---|
+| Q1 `readNbt` 不丢数据、不抛 | **PASS** | `StorageManager.java:52-56` 先 `hasUUID` 守卫再 `continue`；`:60-64` 的 `try/catch(Exception)` 字节码异常表 `from 73 to 97 target 100` 覆盖 `getUUID`+`getCompound`+`fromNbt`+`put` 全段；`hasUUID` 实测语义 = `get(key)` 非空 + `Tag.getType()==IntArrayTag.TYPE` + 长度 4，三种坏法都只返回 false。每条合法 entry 必 `put`。 |
+| Q2 读路径不再弄脏存档 | **PASS**（一条残留写入，仅坏数据可达） | 读路径全部经 `DISKCellInventory.java:108 storageManager.getDisk(diskId)`（`StorageManager.java:90-93` 只 `get`、不 `setDirty`）；写路径仍用 `getOrCreateDisk`/`updateDisk`/`modifyDisk`/`removeDisk`（`:209/:222/:224/:229/:191`）。残留：损坏数据的 `loadCellItems` 自修复会 `removeDisk`（`:378-382` → `:189-197`），与 upstream 一致。 |
+| Q3 `insert()` 门禁顺序 | **PASS** | 源码顺序 `:423` 参数 → `:427` manager==null 拒绝 → `:434/:438` 分区/黑名单 → `:456-460` 铸 UUID → `:474-477` 才 put+saveChanges；字节码偏移序列 `20/28` 门禁在最前，`147 UUID.randomUUID`、`222 put`、`230 saveChanges` 在其后 ⇒ SIMULATE 探针零副作用。 |
+| Q4 存档格式 | **PASS**（对 upstream 1.20.1 全等）/ 与 1.21.1 线不同键名 | 逐键核对：`disk_manager` / `disklist` / `diskuuid`(IntArray4) / `diskdata` / `keys` / `amts` / `ic`(仅非 0 时写) 与 upstream 1.20.1 完全一致，`diskuuid` 与 `diskdata` 同级。 |
+
+### 12.1 关于「与 1.21.1 线键名不同」的定性（不修）
+- 1.21.1 线用 `disk_id` / `item_count`，1.20.1 线用 `diskuuid` / `ic`。**这不是本移植的偏差**：上游 1.21.1 自己就把键名改成了 `disk_id`/`item_count`（`_ref/ae2things-forge-upstream/src/main/java/io/github/projectet/ae2things/util/StorageManager.java:19`、`DataStorage.java:11`），而 1.20.1 上游（tag `1.2.1`）一直是 `diskuuid`/`ic`。
+- 因此 1.20.1 线**必须**用 `diskuuid`/`ic`：这既是 1.2.1 存档能直接读的唯一前提，也是本项目 AGENTS §1.2「存档格式完全兼容」的落点。
+- 后果边界：把 1.21.1 世界的 `world/data/disk_manager.dat` 手工搬到 1.20.1，条目会因缺 `diskuuid` 被丢弃（有 warn 日志），反向则 1.21.1 读 1.20.1 的键会 NPE。1.20.1 客户端本来就无法加载 1.21.1 世界，所以这条只在手工搬文件时成立，属**预期行为**。
+
+### 12.2 复核发现并已修复的缺陷（P2）
+- 现象：物品 NBT 里 `diskuuid` 存在但值不是 4-int UUID（手改、或被别的版本写坏）时，`hasDiskUUID()` 只判 `contains` 为真 ⇒ `insert` 不铸新 id，`getDiskUUID()` 返回 null ⇒ `persist()` 直接 `isPersisted = true; return;` ⇒ 内容只活在内存里，卸载即丢。
+- 修复：`DISKCellInventory.persist()` 在 `diskId == null && storedItemCount > 0` 时**就地铸一个 UUID 并写回物品**，再继续正常落盘（不再静默返回）。
+- 未改 `insert`（MEGA 的 `@ModifyExpressionValue` 依赖 `insert` 里恰好一处 `isBlackListed` invokeinterface，动它风险更大）。
+- 重新构建：`AE2-Things-1.3.0.jar` 80,250 B / 103 entries / sha256 `2881b38b9ada9e136f260adf2a94d869698e75da487fa080ad7ecf6b511768df`；联调服务端复跑 `Done (1.259s)!`，NoSuchMethod/NoSuchField/AbstractMethod/ClassNotFound/MixinApplyError 计数全 0。
+
+### 12.3 复核保留但本次不改的项（P3/P4，均继承自上游）
+- P3：损坏数据触发的 `loadCellItems` 自修复会在「读」路径写盘（`DISKDrive.java:119-121` 入口），与 upstream 1.20.1 同形；要彻底消除需给 `DISKCellInventory` 加只读标志，属独立改动。
+- P4：`IDISKCellItem.java:100` 克隆时对源 id 用 `getOrCreateDisk`，源盘无记录时会顺手建一条空记录（写路径，影响可忽略）。

@@ -198,10 +198,13 @@ public class DISKCellInventory implements StorageCell {
         }
 
         if (diskId == null) {
-            // Contents without an id cannot be written anywhere. Dropping them would be worse than keeping them in this
-            // instance, so leave the cell dirty-free and let the next modifying insert create the id.
-            this.isPersisted = true;
-            return;
+            // A cell can carry contents and still have no usable id: the {@code diskuuid} tag may be missing, or
+            // present
+            // with a value that is not a 4-int UUID (item NBT edited by hand, or copied from a save written by another
+            // version of this mod). Writing those contents anywhere requires an id, so mint one here instead of quietly
+            // keeping them in this instance until the cell unloads.
+            diskId = UUID.randomUUID();
+            setDiskUUID(i, diskId);
         }
 
         // Writing is the one place that may create the entry: a cell that never received anything real (a simulated
