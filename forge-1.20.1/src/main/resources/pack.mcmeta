@@ -1,0 +1,10 @@
+{
+  "pack": {
+    "description": "AE2 Things Reforged resources",
+    "pack_format": 15,
+    "supported_formats": [
+      15,
+      15
+    ]
+  }
+}

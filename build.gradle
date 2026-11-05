@@ -5,7 +5,9 @@ plugins {
 }
 
 group = "io.github.merlin-kitsune"
-version = System.getenv("AE2THINGS_VERSION") ?: "0.0.0"
+// Per-line version: this line (1.21.1 NeoForge) owns its own number in gradle.properties.
+// CI may override with -Pmod_version=<tag>; no environment variable is involved.
+version = mod_version
 
 repositories {
     maven {

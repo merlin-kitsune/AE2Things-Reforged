@@ -1,0 +1,47 @@
+modLoader="javafml"
+# 加载器(javafml 语言提供者)版本门槛:只能卡到 **Forge 主版本系列**([47,48)) ——
+# javafml 语言提供者的版本号就是主系列号(47),与完整版本号不同构;写成 "[47.1.47,48)" 会被
+# FML 判为 "Missing language javafml version ... found 47" 而直接拒绝加载本模组。
+# 精确下限([47.1.47,48))放在下方 modId="forge" 依赖上,由 FML 依赖排序阶段拒绝。
+loaderVersion="${forge_language_version_range}"
+
+license="${mod_license}"
+
+issueTrackerURL="https://github.com/merlin-kitsune/AE2Things-Reforged/issues"
+
+[[mods]]
+modId="${mod_id}"
+version="${mod_version}"
+displayName="${mod_name}"
+displayURL="https://github.com/merlin-kitsune/AE2Things-Reforged"
+logoFile="icon.png"
+credits="Reforged fork by MerlinKitsune. Original AE2 Things by ProjectET (Fabric) and Technici4n (Forge)."
+authors="MerlinKitsune, Technici4n, ProjectET"
+description='''
+AE2 Things Reforged — storage cells for Applied Energistics 2 that store their contents in a
+world-level side table instead of the item stack's NBT, plus the optimisations and bug fixes made
+for the 1.21.1 line of this fork.
+'''
+
+# Forge 1.20.1 的依赖声明用 mandatory 布尔(NeoForge 1.20.5+ 才是 type="required"/"optional")。
+# 依赖必须写 modId="forge"(除 minecraft 之外)才能让 FML 把 Forge 本体算进必需项。
+[[dependencies.${mod_id}]]
+    modId="forge"
+    mandatory=true
+    versionRange="${forge_version_range}"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="${minecraft_version_range}"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="ae2"
+    mandatory=true
+    versionRange="${ae2_version_range}"
+    ordering="AFTER"
+    side="BOTH"

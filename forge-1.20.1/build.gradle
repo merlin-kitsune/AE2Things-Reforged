@@ -1,0 +1,142 @@
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev.legacyforge' version '2.0.144'
+    id 'com.diffplug.spotless' version '6.25.0'
+}
+
+version = mod_version
+group = mod_group_id
+
+base {
+    archivesName = 'AE2-Things'
+}
+
+// MC 1.20.1 是 Java 17 时代(1.21.1 线为 Java 21)
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+
+repositories {
+    mavenCentral()
+    maven { url = uri('https://maven.neoforged.net/releases') }
+    maven {
+        name = 'Modrinth'
+        url = uri('https://api.modrinth.com/maven')
+        content { includeGroup 'maven.modrinth' }
+    }
+}
+
+legacyForge {
+    version = project.forge_version
+
+    parchment {
+        minecraftVersion = project.parchment_minecraft_version
+        mappingsVersion = project.parchment_mappings_version
+    }
+
+    runs {
+        configureEach {
+            gameDirectory = file('run')
+            // dev 下显式声明 mixin 配置(生产 jar 靠 MANIFEST 的 MixinConfigs;Forge 1.20.1 不读
+            // mods.toml 的 [[mixins]],该块是 NeoForge 1.20.3+ 的东西)。
+            // 名字必须与 src/main/resources 里的**实际文件名**一致 —— manifest 写错的后果是
+            // mixin 静默不加载(游戏照常启动,只有注入效果消失),极难排查。
+            jvmArgument '-Dmixin.config=mixins.ae2things.json'
+        }
+
+        client {
+            client()
+        }
+
+        server {
+            server()
+            programArgument '--nogui'
+        }
+    }
+
+    mods {
+        ae2things {
+            sourceSet sourceSets.main
+        }
+    }
+
+    mixin {
+        config 'mixins.ae2things.json'
+        add sourceSets.main, 'ae2things.refmap.json'
+    }
+}
+
+dependencies {
+    // AE2 15.4.12(Forge)。modImplementation 让 MDG legacyforge 把生产 jar 重映射成 dev 命名。
+    modImplementation "maven.modrinth:ae2:${ae2_version_id}"
+    // GuideME:AE2 的 mandatory 前置(未内嵌)。本模组不引用其 API ⇒ 只要运行期存在。
+    modRuntimeOnly "maven.modrinth:guideme:${guideme_version_id}"
+
+    // Mixin:编译期注解 + 注解处理器(refmap 生成)。
+    // Forge 1.20.1 的生产 jar 是 SRG 名,@Inject 里的方法选择器靠 refmap 翻译;dev 环境是 Mojmap 名,
+    // 选择器直接命中 ⇒ refmap 缺失只在生产暴露。
+    compileOnly 'org.spongepowered:mixin:0.8.5'
+    annotationProcessor 'org.spongepowered:mixin:0.8.5'
+    annotationProcessor 'com.google.code.gson:gson:2.10.1'
+    annotationProcessor 'com.google.guava:guava:31.1-jre'
+    annotationProcessor 'org.ow2.asm:asm:9.7'
+    annotationProcessor 'org.ow2.asm:asm-tree:9.7'
+    annotationProcessor 'org.ow2.asm:asm-commons:9.7'
+    annotationProcessor 'org.ow2.asm:asm-util:9.7'
+    annotationProcessor 'org.ow2.asm:asm-analysis:9.7'
+}
+
+// Forge 自身版本门槛(单一来源 = gradle.properties 的 forge_version):
+//   loaderVersion 只能卡到语言提供者的主系列号([47,48))——写成 "[47.1.47,48)" 会被 FML 判为
+//   "Missing language javafml version ... found 47" 而拒绝加载本模组;
+//   精确下限放在 modId="forge" 依赖上,由 FML 依赖排序阶段拒绝。
+def forgeSemver = project.forge_version.toString().split('-').last()
+def forgeMajor = (forgeSemver.split('\\.')[0] as int)
+def forgeVersionRange = "[${forgeSemver},${forgeMajor + 1})"
+def forgeLanguageRange = "[${forgeMajor},${forgeMajor + 1})"
+logger.lifecycle("forgeVersionRange: ${forgeVersionRange} / forgeLanguageRange: ${forgeLanguageRange}")
+
+var generateModMetadata = tasks.register("generateModMetadata", ProcessResources) {
+    var replaceProperties = [
+            minecraft_version          : minecraft_version,
+            minecraft_version_range    : minecraft_version_range,
+            forge_language_version_range: forgeLanguageRange,
+            forge_version_range        : forgeVersionRange,
+            ae2_version_range          : ae2_version_range,
+            mod_id                     : mod_id,
+            mod_name                   : mod_name,
+            mod_license                : mod_license,
+            mod_version                : mod_version,
+    ]
+    inputs.properties replaceProperties
+    // 模板文件是 UTF-8(含中文注释)。不设这个,ProcessResources 会用 JVM 默认编码读,
+    // 产出的 mods.toml 注释直接变乱码(实测看到 "������")。
+    filteringCharset = 'UTF-8'
+    expand replaceProperties
+    from "src/main/templates"
+    into "build/generated/sources/modMetadata"
+}
+sourceSets.main.resources.srcDir generateModMetadata
+legacyForge.ideSyncTask generateModMetadata
+
+// 生产 jar(重混淆)与开发 jar 都写入 MixinConfigs 清单属性 —— Forge 1.20.1 靠它发现 mixin 配置。
+tasks.withType(org.gradle.api.tasks.bundling.Jar).configureEach {
+    manifest {
+        attributes 'MixinConfigs': 'mixins.ae2things.json'
+        attributes 'Implementation-Version': project.version
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+spotless {
+    java {
+        target 'src/main/java/**/*.java'
+        endWithNewline()
+        indentWithSpaces()
+        removeUnusedImports()
+        toggleOffOn()
+        eclipse().configFile('../codeformat/codeformat.xml')
+        importOrderFile('../codeformat/ae2.importorder')
+    }
+}

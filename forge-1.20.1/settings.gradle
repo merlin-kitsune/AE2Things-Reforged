@@ -1,0 +1,16 @@
+// AE2Things Reforged — 1.20.1 Forge 线(自包含构建)
+// 与仓库根的 1.21.1 NeoForge 构建相互独立:根构建保持原样(CI/发布不受影响),
+// 本目录自带 gradle wrapper 与 settings.gradle,单独 `cd forge-1.20.1 && ./gradlew build` 即可构建。
+pluginManagement {
+    repositories {
+        maven { url = uri('https://maven.neoforged.net/releases') }
+        gradlePluginPortal()
+        mavenCentral()
+    }
+}
+
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+}
+
+rootProject.name = 'AE2-Things-1.20.1'

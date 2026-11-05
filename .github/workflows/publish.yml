@@ -28,9 +28,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
       - name: Build
-        run: ./gradlew build
-        env:
-          AE2THINGS_VERSION: ${{ github.event.release.tag_name }}
+        run: ./gradlew build -Pmod_version=${{ github.event.release.tag_name }}
       - name: Upload Release Artifact
         run: gh release upload "${{ github.event.release.tag_name }}" "./build/libs/AE2-Things-${{ github.event.release.tag_name }}.jar" --clobber
         env:
