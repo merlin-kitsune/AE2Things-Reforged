@@ -13,7 +13,8 @@
 | 版本号 | **1.3.0**（jar 名 `AE2-Things-1.3.0.jar`，manifest `Implementation-Version: 1.3.0`） |
 | 构建 | 通过（`spotlessCheck` + `build`），103 entries，80,552 B，sha256 `f766e83dbc4010681530389ab6db37aa95c561fc5e494fba7db8c3a566c3868f` |
 | 开发服启动 | 通过：mod 容器创建、mixin 注入 `AbstractContainerMenu` 成功、数据包加载无报错 |
-| 提交 | 本地四次提交：`06d4b40`（移植）/ `613bd18`（persist 铸锚补漏）/ `f27a496`（第二轮复核修复批次，见 §13）/ 本轮裁决落地（见 §14）；**未推送**，等实机指令 |
+| 提交 | 本地提交：`06d4b40`（移植）/ `613bd18`（persist 铸锚补漏）/ `f27a496`（第二轮复核修复批次，见 §13）/ `dab1745`（裁决落地 + 共享修复回灌 1.21.1，见 §14–§16）；**未推送** |
+| 实机验收 | **两线均通过**（2026-11-05）：1.20.1（Forge 47.1.47 + AE2 15.4.12）与 1.21.1（NeoForge 21.1.248 + AE2 19.2.18）的驱动器/ME 箱子 GUI、物品读盘、真实写入、染色、创造中键克隆全部实测通过，见 §17 |
 
 ## 2. 目录与构建
 
@@ -371,3 +372,63 @@ cd F:/MCProject/ae2things-reforged/forge-1.20.1
 - 19.2.18 的链路：`MEChestBlock.useWithoutItem` → `MEChestBlockEntity.openGui(Player)` → `StorageCells.getHandler(cell)` + `BasicCellChestMenu.TYPE`（`extends MEStorageMenu`）→ 直接开 ME 存储界面。我们对任意 `IDISKCellItem` 都返回库存（`DISKCellHandler.getCellInventory` → `DISKCellInventory.createInventory`），所以**点 ME 箱子顶面本来就开 ME 存储界面**。
 - 上游为什么非注册不可：1.20.1 默认处理器 `BasicItemCellGuiHandler.isSpecializedFor` 要求 `instanceof IBasicCellItem`，而我们的 `DISKDrive extends Item implements IDISKCellItem` 不是；19 把判据换成了 `ICellHandler`，我们本来就注册了。
 - 因此：1.21.1 线**不新建** `DISKItemCellGuiHandler`；1.20.1 线的 `gui/cell/DISKItemCellGuiHandler.java` **保留**（15.4.12 仍然需要它）。
+
+## 17. 实机验收（2026-11-05，两线均已完成）
+
+用户裁决「立即进行实机，先做 1.20.1，再做 1.21.1」（m01411）。做法：不依赖桌面自动化（本会话 `computer_*` 被审批策略拒绝），改为**在游戏内部驱动**——一个临时 Java 自测处理器（dev-only，`build.gradle` 的 `exclude("io/github/projectet/ae2things/dev/**")` 保证不进发布 jar）在真实客户端里按 tick 推进、走正常点击路径开 GUI、并用 `Screenshot.grab` 让游戏自己截图。验收完成后自测代码与两个 hook 全部删除，重建后 jar 与自测前逐字节相同。
+
+### 17.1 1.20.1 Forge 线（Forge 47.1.47 + AE2 15.4.12）
+
+证据：`forge-1.20.1/run/st4.log`（服务端状态机日志）+ `docs/port-1.20.1/screenshots/`（游戏内截图）。
+
+| 检查点 | 实测 |
+|---|---|
+| 网格与供电 | `grid=ok powered=true online=true` |
+| ME 网络读盘 | `network types=3`：铁锭 x 3000 / 圆石 x 5000 / 钻石 x 4096 |
+| 实际写入（MODULATE） | `poweredInsert redstone requested=100 inserted=100` |
+| 侧表落盘 | `side table after insert: itemCount=12196 keys=4`；`cell nbt count after insert=12196` |
+| 物品染色（P2-9 静态读 NBT） | `0xff00aaff`（NOT_EMPTY）/ `0xff00ff00`（EMPTY）/ 基色 |
+| 创造中键克隆（mixin） | 克隆后 `sameId=false`（新 UUID，不共用同一份侧表条目 = F1 已修） |
+| GUI 素材 | `ME 驱动器` / `ME 箱子` 均为 **1.20.1 老素材**风格（未混入 1.21.1 重绘资产） |
+
+### 17.2 1.21.1 NeoForge 线（NeoForge 21.1.248 + AE2 19.2.18）
+
+证据：`run/st7.log` + `docs/in-game-verification/1.21.1/`（5 张游戏内截图）。
+
+| 检查点 | 实测 |
+|---|---|
+| 侧表播种 | `seeded types=3 itemCount=12096` |
+| 驱动器内磁盘 | `drive=BlockPos{x=8,y=-59,z=-5} cell=1 ae2things:disk_drive_256k` |
+| 状态与容量 | `status=NOT_EMPTY totalBytes=256000 nbtCount=12096`；空盘 `EMPTY` |
+| 染色（静态 `getClientStatus(ItemStack)`） | `0xff00aaff` / `0xff00ff00` / 基色 `0xffffffff` |
+| tooltip | 名称 / 描述 / `Disk UUID: 00000000-...-a2` / `12096 / 256000 字节已使用` |
+| 驱动器 GUI | `screen=appeng.client.gui.implementations.DriveScreen`，截图 `02_drive_gui.png` |
+| ME 箱子 GUI | `screen=appeng.client.gui.me.common.MEStorageScreen`，截图 `03_me_chest_gui.png`（3 种物品） |
+| 实际写入 | `insert redstone requested=100 inserted=100`；`side table itemCount=12196 keys=4` |
+| 创造中键克隆 | `original=...a2 carried=f23c22d4-... sameId=false` |
+| SIMULATE 探针（C4） | `simulate insert=10 uuidAfter=...a3 sideEntry=false` ⇒ 模拟插入不新铸 UUID、不建侧表条目 |
+
+### 17.3 排查记录：dev 服务器启动即停的真因（重要，别再误判）
+
+1.21.1 侧一开始表现为「服务器启动 1 秒后静默 `Stopping server`、客户端卡死在 `Minecraft.doWorldLoad`」，一度怀疑是模组或 mixin 问题。最终用**临时 `@Mixin(MinecraftServer)` 探针**在 `halt(boolean)` / `stopServer()` 头部打线程栈定位到：
+
+```
+[HALTPROBE] MinecraftServer.halt(false) thread=Server thread
+  at io.github.projectet.ae2things.dev.GoldenSampleDump.onServerStarted(GoldenSampleDump.java:140)
+  at net.neoforged.neoforge.server.ServerLifecycleHooks.handleServerStarted(ServerLifecycleHooks.java:113)
+```
+
+即 `dev/GoldenSampleDump`（上一轮性能工作的黄金样本导出器）被 `run/ae2things-golden-dump.txt` 这个**遗留触发文件**（2026-10-06 留下的）激活，它导出完样本就会 `saveEverything(true,true,true)` + `server.halt(false)`——所以每次 dev 启动（含客户端内置服）都被它停掉。已把触发文件改名为 `run/ae2things-golden-dump.txt.disabled`（`run/` 不入库），与模组代码无关。
+
+> 教训：`MinecraftServer.halt` 探针（`@Inject(method="halt(Z)V", at=@At("HEAD"), remap=false)`）是这类「谁把服务器关了」问题的唯一可靠取证手段；在 `ServerStoppingEvent` 里扫线程栈只能看到 `halt(false)` 之后的状态，永远抓不到调用者。
+
+### 17.4 复现方式
+
+```bash
+# 1.20.1 线：真实客户端（旧素材），用 build.gradle 里的 client run 启动，自测脚本已移除
+cd forge-1.20.1 && ./gradlew runClient
+# 1.21.1 线
+./gradlew runClient
+```
+
+两线自测均已完成并通过，自测代码、`AE2Things` / `AE2ThingsClient` 的 hook、`build.gradle` 里的两处 TEMPORARY 均已移除（`git status` 干净）。
