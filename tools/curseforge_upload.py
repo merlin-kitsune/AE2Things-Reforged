@@ -46,8 +46,16 @@ def token_from(args):
     return tok
 
 
+# CurseForge sits behind Cloudflare, which bans the stock "Python-urllib/x.y" agent
+# with "403 browser_signature_banned" (error 1010). Identify ourselves instead of
+# spoofing a browser.
+USER_AGENT = ("AE2ThingsReforged-Uploader/1.0 "
+              "(+https://github.com/merlin-kitsune/AE2Things-Reforged)")
+
+
 def request(url, token, data=None, content_type=None, method=None):
     req = urllib.request.Request(url, data=data, method=method)
+    req.add_header("User-Agent", USER_AGENT)
     req.add_header("X-Api-Token", token)
     req.add_header("Accept", "application/json")
     if content_type:
