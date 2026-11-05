@@ -1,5 +1,7 @@
 # AE2Things Reforged
 
+**English** | [简体中文](README_ZH.md)
+
 A reworked fork of [AE2 Things](https://github.com/Technici4n/AE2Things-Forge) that keeps every feature of the
 original mod, targets the current AE2 API on each Minecraft version, and removes a large amount of the extra
 performance overhead that large networks used to cause.
@@ -88,19 +90,3 @@ The version of each line comes from its own `gradle.properties` (`mod_version`);
 - Original mod by **ProjectET** (Fabric) and **Technici4n** (Forge / NeoForge port).
 - This fork is maintained by **MerlinKitsune**; it is not affiliated with or endorsed by the original authors.
 - Licensed under the MIT license, see [LICENSE](LICENSE).
-
----
-
-## 中文简介
-
-AE2 Things Reforged 是 [AE2 Things](https://github.com/Technici4n/AE2Things-Forge) 的优化分支，完整保留原模组的
-全部功能（DISK 磁盘、驱动器、分区、模糊卡/反向卡、`/ae2things` 命令），并大幅降低大网络下的额外开销：
-
-- **性能**：把「无类型上限」所依赖的侧表做成了增量写、按键缓存序列化结果、读路径只读、加载不再标脏、渲染不再每帧构
-  造 inventory。
-- **修复**：中键克隆/恢复命令不再让两个磁盘共用一份数据、长度不一致不再崩、坏条目不再被静默抹掉、模拟插入不再铸造
-  UUID、拆盘清理侧表、服务端表不可用时拒绝写入。
-- **兼容**：与 AE2 MEGA Things 保持二进制级兼容（1.20.1 已实机联合启动验证，1.21.1 已逐条核对符号与注入点）。
-
-版本对应：**1.21.1 NeoForge = 1.4.5**（需 AE2 19.2.18+、Java 21），**1.20.1 Forge = 1.3.1**（需 AE2 15.4.12+、
-Java 17）。同 modId、同存档格式，可直接替换上游版本。
