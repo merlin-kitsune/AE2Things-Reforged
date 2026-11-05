@@ -30,7 +30,7 @@ Facts this script encodes (all verified on 2026-11-05):
 
     # the project page
     CURSEFORGE_TOKEN=... python tools/curseforge_upload.py --project 1729932 \
-        --description-file docs/curseforge/DESCRIPTION.html
+        --description-file docs/curseforge/DESCRIPTION.md
 """
 import argparse
 import json

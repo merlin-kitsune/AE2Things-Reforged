@@ -18,7 +18,7 @@ on:
         options: [neoforge, forge]
         default: neoforge
       description:
-        description: Also push docs/curseforge/DESCRIPTION.html as the project page
+        description: Also push docs/curseforge/DESCRIPTION.md as the project page
         type: boolean
         default: false
 
@@ -68,4 +68,4 @@ jobs:
         if: ${{ inputs.description }}
         run: |
           python3 tools/curseforge_upload.py --project "$CURSEFORGE_PROJECT" \
-            --description-file docs/curseforge/DESCRIPTION.html
+            --description-file docs/curseforge/DESCRIPTION.md
