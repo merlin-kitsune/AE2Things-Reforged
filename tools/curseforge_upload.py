@@ -1,109 +1,166 @@
 #!/usr/bin/env python3
-"""Upload a built jar to CurseForge, and optionally update the project description.
+"""Upload a release jar to CurseForge, and optionally update the project description.
 
-Stdlib only. The API token is read from the CURSEFORGE_TOKEN environment variable
-(or --token-file); it is never printed.
+Facts this script encodes (all verified on 2026-11-05):
 
-    # see what would be sent (no network when the token is absent)
-    python tools/curseforge_upload.py --project 123456 \
-        --file build/libs/AE2-Things-1.4.4.jar --mc 1.21.1 --loader neoforge \
-        --changelog-file docs/curseforge/CHANGELOG-1.4.4.md --dry-run
+* The upload endpoint is the LEGACY one and it is hyphenated:
+      POST https://minecraft.curseforge.com/api/projects/{projectId}/upload-file
+  "uploadFile" (no hyphen) is the ASP.NET error path and answers a 302 to
+  /error?aspxerrorpath=..., which is easy to mistake for a failure of the token.
+* Authentication is the header X-Api-Token. The token is a UUID-form project token
+  from the CurseForge project page, NOT a Core API key.
+* gameVersions must carry four ids (Client, Server, Minecraft <version>, Modloader);
+  they are resolved by TYPE NAME through /game/version-types, because the plain
+  /game/versions list contains the same name (for example "1.21.1") under several
+  unrelated types.
+* CurseForge sits behind Cloudflare. The stock Python agent is refused with
+  "403 browser_signature_banned" (error 1010), and a redirect-following urllib POST
+  hides the 302 above, so every request here goes through curl with an explicit,
+  honest User-Agent.
+
+    # plan only, no network
+    python tools/curseforge_upload.py --project 1729932 \
+        --file build/libs/AE2-Things-1.4.5.jar --mc 1.21.1 --loader neoforge --dry-run
 
     # the real upload
-    CURSEFORGE_TOKEN=xxx python tools/curseforge_upload.py --project 123456 \
-        --file forge-1.20.1/build/libs/AE2-Things-1.3.0.jar --mc 1.20.1 --loader forge \
-        --changelog-file docs/curseforge/CHANGELOG-1.3.0.md --release-type release
+    CURSEFORGE_TOKEN=... python tools/curseforge_upload.py --project 1729932 \
+        --file build/libs/AE2-Things-1.4.5.jar --mc 1.21.1 --loader neoforge \
+        --changelog-file docs/curseforge/CHANGELOG-1.4.5.md \
+        --display-name "AE2 Things Reforged 1.4.5 (NeoForge 1.21.1)"
 
-    # push the project page description (HTML)
-    CURSEFORGE_TOKEN=xxx python tools/curseforge_upload.py --project 123456 \
+    # the project page
+    CURSEFORGE_TOKEN=... python tools/curseforge_upload.py --project 1729932 \
         --description-file docs/curseforge/DESCRIPTION.html
 """
 import argparse
 import json
-import mimetypes
 import os
+import shutil
+import subprocess
 import sys
-import urllib.error
-import urllib.request
-import uuid
 
 API = "https://minecraft.curseforge.com/api"
-
-# game version type ids used by the CurseForge website (resolved by name when possible)
-EXPECTED_TYPES = {
-    "minecraft": 75125,
-    "forge": 68441,
-    "neoforge": 1010836,
-    "fabric": 68442,
-}
+CORE_API = "https://api.curseforge.com/v1"
+USER_AGENT = ("AE2ThingsReforged-Uploader/1.1 "
+              "(+https://github.com/merlin-kitsune/AE2Things-Reforged)")
+CURL = shutil.which("curl") or "curl"
 
 
 def token_from(args):
-    tok = os.environ.get("CURSEFORGE_TOKEN", "").strip()
+    tok = (os.environ.get("CURSEFORGE_TOKEN") or "").strip()
     if not tok and args.token_file:
         with open(args.token_file, "r", encoding="utf-8") as fh:
             tok = fh.read().strip()
     return tok
 
 
-# CurseForge sits behind Cloudflare, which bans the stock "Python-urllib/x.y" agent
-# with "403 browser_signature_banned" (error 1010). Identify ourselves instead of
-# spoofing a browser.
-USER_AGENT = ("AE2ThingsReforged-Uploader/1.0 "
-              "(+https://github.com/merlin-kitsune/AE2Things-Reforged)")
-
-
-def request(url, token, data=None, content_type=None, method=None):
-    req = urllib.request.Request(url, data=data, method=method)
-    req.add_header("User-Agent", USER_AGENT)
-    req.add_header("X-Api-Token", token)
-    req.add_header("Accept", "application/json")
-    if content_type:
-        req.add_header("Content-Type", content_type)
+def curl(argv, timeout=300):
+    """Run curl, return (status_code, body_text). status 0 means curl itself failed."""
+    cmd = [CURL, "-sS", "--max-time", str(timeout),
+           "-A", USER_AGENT, "-H", "Accept: application/json"]
+    cmd += argv
     try:
-        with urllib.request.urlopen(req, timeout=180) as resp:
-            return resp.status, resp.read().decode("utf-8", "replace")
-    except urllib.error.HTTPError as exc:
-        return exc.code, exc.read().decode("utf-8", "replace")
+        out = subprocess.run(cmd, capture_output=True, timeout=timeout + 30)
+    except Exception as exc:  # noqa: BLE001 - surface any curl problem as a body
+        return 0, "curl failed: %s" % exc
+    body = out.stdout.decode("utf-8", "replace")
+    err = out.stderr.decode("utf-8", "replace").strip()
+    if out.returncode != 0 and not body:
+        return 0, err or ("curl exit %d" % out.returncode)
+    return out.returncode if False else _status(body), _strip_status(body)
 
 
-def multipart(fields, files):
-    """fields: dict name->str, files: dict name->(filename, bytes, mimetype)."""
-    boundary = "----dshcf" + uuid.uuid4().hex
-    out = bytearray()
-    for name, value in fields.items():
-        out += ("--%s\r\n" % boundary).encode()
-        out += ('Content-Disposition: form-data; name="%s"\r\n\r\n' % name).encode()
-        out += value.encode("utf-8") + b"\r\n"
-    for name, (filename, blob, mime) in files.items():
-        out += ("--%s\r\n" % boundary).encode()
-        out += ('Content-Disposition: form-data; name="%s"; filename="%s"\r\n'
-                % (name, filename)).encode()
-        out += ("Content-Type: %s\r\n\r\n" % mime).encode()
-        out += blob + b"\r\n"
-    out += ("--%s--\r\n" % boundary).encode()
-    return bytes(out), "multipart/form-data; boundary=%s" % boundary
+def _status(body):
+    """curl -w appends the status code as the very last line."""
+    tail = body.rstrip("\n").rsplit("\n", 1)
+    if len(tail) == 2 and tail[1].strip().isdigit():
+        return int(tail[1].strip())
+    return 0
+
+
+def _strip_status(body):
+    tail = body.rstrip("\n").rsplit("\n", 1)
+    if len(tail) == 2 and tail[1].strip().isdigit():
+        return tail[0]
+    return body
+
+
+def api_get(path, token):
+    """GET an API path (relative to API) and return decoded JSON or raise SystemExit."""
+    status, body = curl(["-H", "X-Api-Token: " + token,
+                         "-w", "\n%{http_code}", API + path])
+    if status != 200:
+        raise SystemExit("GET %s failed: HTTP %s %s" % (path, status, body[:400]))
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError:
+        raise SystemExit("GET %s did not answer JSON: %s" % (path, body[:400]))
 
 
 def resolve_game_versions(token, mc, loader):
-    status, body = request(API + "/game/versions", token)
-    if status != 200:
-        raise SystemExit("GET /game/versions failed: %s %s" % (status, body[:400]))
-    versions = json.loads(body)
-    wanted_loader = loader.lower()
-    mc_hits = [v for v in versions if str(v.get("name")) == mc]
-    loader_hits = [v for v in versions if str(v.get("name")).lower() == wanted_loader]
-    print("  game versions named %r : %s" % (mc, [(v["id"], v.get("gameVersionTypeID")) for v in mc_hits]))
-    print("  loaders named %r       : %s" % (loader, [(v["id"], v.get("gameVersionTypeID")) for v in loader_hits]))
-    choice = []
-    for hits, want_type, label in ((mc_hits, EXPECTED_TYPES["minecraft"], "minecraft"),
-                                   (loader_hits, EXPECTED_TYPES.get(wanted_loader), loader)):
-        if not hits:
-            raise SystemExit("no CurseForge game version named %r" % label)
-        typed = [v for v in hits if v.get("gameVersionTypeID") == want_type]
-        pick = typed[0] if typed else hits[0]
-        choice.append(pick["id"])
-    return choice
+    """(Client, Server, Minecraft <mc>, Modloader <loader>) by TYPE NAME."""
+    types = {str(t["id"]): t["name"] for t in api_get("/game/version-types", token)}
+    versions = api_get("/game/versions", token)
+
+    def pick(type_name=None, type_prefix=None, name=None, ci=False):
+        for v in versions:
+            tname = types.get(str(v.get("gameVersionTypeID")), "")
+            if type_name is not None and tname != type_name:
+                continue
+            if type_prefix is not None and not tname.startswith(type_prefix):
+                continue
+            a = str(v.get("name", ""))
+            if a.lower() == name.lower() if ci else a == name:
+                return v
+        return None
+
+    chosen = []
+    for env in ("Client", "Server"):
+        v = pick(type_name="Environment", name=env)
+        if v is None:
+            raise SystemExit("CurseForge has no Environment/%s version" % env)
+        chosen.append(v["id"])
+    v = pick(type_prefix="Minecraft ", name=mc)
+    if v is None:
+        raise SystemExit("CurseForge has no Minecraft %r version" % mc)
+    chosen.append(v["id"])
+    v = pick(type_name="Modloader", name=loader, ci=True)
+    if v is None:
+        raise SystemExit("CurseForge has no Modloader %r" % loader)
+    chosen.append(v["id"])
+    detail = dict(zip(("Client", "Server", mc, loader), chosen))
+    return chosen, detail
+
+
+def upload_file(token, project, jar, metadata):
+    status, body = curl([
+        "-X", "POST", "-H", "X-Api-Token: " + token,
+        "-F", "metadata=" + json.dumps(metadata, ensure_ascii=False),
+        "-F", "file=@" + jar + ";type=application/java-archive",
+        "-w", "\n%{http_code}",
+        "%s/projects/%s/upload-file" % (API, project),
+    ])
+    return status, body
+
+
+def push_description(token, project, path):
+    status, body = curl([
+        "-X", "POST", "-H", "X-Api-Token: " + token,
+        "-F", "description=<" + path,
+        "-w", "\n%{http_code}",
+        "%s/projects/%s/description" % (API, project),
+    ])
+    if status == 200:
+        return status, body
+    # Fall back to the Core API, which takes the same value via PUT /v1/mods/{id}
+    with open(path, "r", encoding="utf-8") as fh:
+        payload = json.dumps({"description": fh.read()})
+    status2, body2 = curl([
+        "-X", "PUT", "-H", "x-api-key: " + token, "-H", "Content-Type: application/json",
+        "--data-binary", payload, "-w", "\n%{http_code}",
+        "%s/mods/%s" % (CORE_API, project),
+    ])
+    return status2, body2
 
 
 def main():
@@ -127,49 +184,54 @@ def main():
     if not token:
         print("[warn] no token: only the local metadata can be shown")
 
-    meta = {}
+    if args.file and not os.path.isfile(args.file):
+        raise SystemExit("no such file: %s" % args.file)
+
     if args.file:
-        if not os.path.isfile(args.file):
-            raise SystemExit("no such file: %s" % args.file)
         changelog = ""
         if args.changelog_file:
             with open(args.changelog_file, "r", encoding="utf-8") as fh:
                 changelog = fh.read()
-        meta = {
+        metadata = {
             "changelog": changelog,
             "changelogType": args.changelog_type,
             "displayName": args.display_name or os.path.basename(args.file),
             "releaseType": args.release_type,
         }
-        if token and args.mc and args.loader:
-            print("[1/2] resolving CurseForge game version ids")
-            meta["gameVersions"] = resolve_game_versions(token, args.mc, args.loader)
+        if args.mc and args.loader:
+            if token:
+                print("[1/2] resolving game version ids by type name")
+                ids, detail = resolve_game_versions(token, args.mc, args.loader)
+                metadata["gameVersions"] = ids
+                print("      " + json.dumps(detail, ensure_ascii=False))
+            else:
+                print("[1/2] skipped (no token, dry run)")
         print("[2/2] file metadata")
-        print(json.dumps(meta, indent=2, ensure_ascii=False)[:2000])
+        shown = dict(metadata)
+        shown["changelog"] = (shown.get("changelog") or "")[:120] + ("..." if len(shown.get("changelog") or "") > 120 else "")
+        print(json.dumps(shown, indent=2, ensure_ascii=False))
 
-    if args.dry_run:
-        print("[dry-run] nothing uploaded")
-        return
-
-    if args.file:
-        with open(args.file, "rb") as fh:
-            blob = fh.read()
-        mime = mimetypes.guess_type(args.file)[0] or "application/java-archive"
-        body, ctype = multipart({"metadata": json.dumps(meta, ensure_ascii=False)},
-                                {"file": (os.path.basename(args.file), blob, mime)})
-        status, resp = request("%s/projects/%s/uploadFile" % (API, args.project), token,
-                               data=body, content_type=ctype, method="POST")
-        print("uploadFile -> %s %s" % (status, resp[:2000]))
+        if args.dry_run:
+            print("[dry-run] nothing uploaded")
+            return
+        if not metadata.get("gameVersions"):
+            raise SystemExit("refusing to upload without gameVersions (pass --mc and --loader)")
+        print("uploading %s ..." % args.file)
+        status, body = upload_file(token, args.project, args.file, metadata)
+        print("upload-file -> HTTP %s" % status)
+        print(body[:1500])
         if status != 200:
             raise SystemExit(1)
 
     if args.description_file:
-        with open(args.description_file, "rb") as fh:
-            blob = fh.read()
-        body, ctype = multipart({"description": blob.decode("utf-8")}, {})
-        status, resp = request("%s/projects/%s/description" % (API, args.project), token,
-                               data=body, content_type=ctype, method="POST")
-        print("description -> %s %s" % (status, resp[:1000]))
+        if args.dry_run:
+            print("[dry-run] would push %s as the project description" % args.description_file)
+            return
+        status, body = push_description(token, args.project, args.description_file)
+        print("description -> HTTP %s" % status)
+        print(body[:600])
+        if status != 200:
+            raise SystemExit(1)
 
 
 if __name__ == "__main__":

@@ -1,13 +1,14 @@
 name: CurseForge
 
-# Uploads a built jar to CurseForge through the legacy upload API.
+# Uploads an already published release asset to CurseForge.
 #
-# It runs on GitHub-hosted runners on purpose: CurseForge sits behind a Cloudflare
-# bot check that answers "403 Just a moment..." to this project's local network, while
-# runner traffic is accepted.
+# Why a workflow and not a local run: CurseForge sits behind Cloudflare, which refuses
+# this project's local network with "403 Just a moment..." while runner traffic is
+# accepted. The asset is downloaded from the GitHub release, so what lands on
+# CurseForge is exactly the jar that was built and tested, not a fresh rebuild.
 #
-#   gh workflow run curseforge.yml -f line=neoforge
-#   gh workflow run curseforge.yml -f line=forge -f description=true
+#   gh workflow run curseforge.yml -f line=neoforge -f description=true
+#   gh workflow run curseforge.yml -f line=forge
 on:
   workflow_dispatch:
     inputs:
@@ -30,48 +31,39 @@ jobs:
     env:
       CURSEFORGE_TOKEN: ${{ secrets.CURSEFORGE_TOKEN }}
       CURSEFORGE_PROJECT: "1729932"
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew forge-1.20.1/gradlew
-      - name: Set up JDK 21
-        uses: actions/setup-java@v6
-        with:
-          distribution: zulu
-          java-version: 21
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
-      - name: Build the NeoForge line
-        if: ${{ inputs.line == 'neoforge' }}
-        run: ./gradlew build
-      - name: Upload the NeoForge line
-        if: ${{ inputs.line == 'neoforge' }}
+      - name: Resolve the release, the version and the loader
         run: |
           set -euo pipefail
-          VERSION="$(grep -E '^mod_version=' gradle.properties | cut -d= -f2)"
-          python3 tools/curseforge_upload.py --project "$CURSEFORGE_PROJECT" \
-            --file "build/libs/AE2-Things-${VERSION}.jar" --mc 1.21.1 --loader neoforge \
-            --changelog-file "docs/curseforge/CHANGELOG-${VERSION}.md" \
-            --display-name "AE2 Things Reforged ${VERSION} (NeoForge 1.21.1)"
-      - name: Set up JDK 17
-        if: ${{ inputs.line == 'forge' }}
-        uses: actions/setup-java@v6
-        with:
-          distribution: zulu
-          java-version: 17
-      - name: Build the Forge line
-        if: ${{ inputs.line == 'forge' }}
-        working-directory: forge-1.20.1
-        run: ./gradlew build
-      - name: Upload the Forge line
-        if: ${{ inputs.line == 'forge' }}
+          if [ "${{ inputs.line }}" = "forge" ]; then
+            VERSION="$(grep -E '^mod_version=' forge-1.20.1/gradle.properties | cut -d= -f2)"
+            echo "TAG=forge-${VERSION}" >> "$GITHUB_ENV"
+            echo "MC=1.20.1" >> "$GITHUB_ENV"
+            echo "LOADER=forge" >> "$GITHUB_ENV"
+            echo "LABEL=Forge 1.20.1" >> "$GITHUB_ENV"
+          else
+            VERSION="$(grep -E '^mod_version=' gradle.properties | cut -d= -f2)"
+            echo "TAG=${VERSION}" >> "$GITHUB_ENV"
+            echo "MC=1.21.1" >> "$GITHUB_ENV"
+            echo "LOADER=neoforge" >> "$GITHUB_ENV"
+            echo "LABEL=NeoForge 1.21.1" >> "$GITHUB_ENV"
+          fi
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+      - name: Download the published jar
         run: |
           set -euo pipefail
-          VERSION="$(grep -E '^mod_version=' forge-1.20.1/gradle.properties | cut -d= -f2)"
+          mkdir -p dist
+          gh release download "$TAG" --pattern "AE2-Things-${VERSION}.jar" --dir dist
+          sha256sum "dist/AE2-Things-${VERSION}.jar"
+      - name: Upload to CurseForge
+        run: |
+          set -euo pipefail
           python3 tools/curseforge_upload.py --project "$CURSEFORGE_PROJECT" \
-            --file "forge-1.20.1/build/libs/AE2-Things-${VERSION}.jar" --mc 1.20.1 --loader forge \
+            --file "dist/AE2-Things-${VERSION}.jar" --mc "$MC" --loader "$LOADER" \
             --changelog-file "docs/curseforge/CHANGELOG-${VERSION}.md" \
-            --display-name "AE2 Things Reforged ${VERSION} (Forge 1.20.1)"
+            --display-name "AE2 Things Reforged ${VERSION} (${LABEL})"
       - name: Push the project page description
         if: ${{ inputs.description }}
         run: |
