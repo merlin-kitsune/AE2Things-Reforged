@@ -29,7 +29,6 @@ import net.minecraft.world.level.Level;
 
 import appeng.api.config.FuzzyMode;
 import appeng.api.stacks.AEKeyType;
-import appeng.api.storage.cells.CellState;
 import appeng.api.upgrades.IUpgradeInventory;
 import appeng.api.upgrades.UpgradeInventories;
 import appeng.hooks.AEToolItem;
@@ -138,6 +137,13 @@ public class DISKDrive extends Item implements IDISKCellItem, AEToolItem {
             if (inv != null && playerInventory.getSelected() == stack) {
                 var list = inv.getAvailableStacks();
                 if (list.isEmpty()) {
+                    // The cell item is about to be destroyed, so its side-table entry would otherwise linger forever.
+                    var diskId = stack.get(AE2Things.DATA_DISK_ID);
+                    var manager = AE2Things.currentStorageManager();
+                    if (diskId != null && manager != null && manager.hasUUID(diskId)) {
+                        manager.removeDisk(diskId);
+                    }
+
                     playerInventory.setItem(playerInventory.selected, ItemStack.EMPTY);
 
                     // drop core
@@ -175,10 +181,10 @@ public class DISKDrive extends Item implements IDISKCellItem, AEToolItem {
 
     public static int getColor(ItemStack stack, int tintIndex) {
         if (tintIndex == 1) {
-            // Create the inventory with an explicit null storage manager since we only need read-only data
-            // And do not want to reach into the server-side storage manager.
-            var cellInv = DISKCellInventory.createInventory(stack, null, null);
-            var cellStatus = cellInv != null ? cellInv.getClientStatus() : CellState.EMPTY;
+            // Read the status straight from the stack: building a cell inventory here would re-read the config and the
+            // upgrade inventory once per rendered layer per frame.
+            var cellStatus = DISKCellInventory.getClientStatus(stack);
+            // AE2's state colours carry no alpha channel, so the top byte has to be forced opaque.
             return 0xFF000000 | cellStatus.getStateColor();
         } else {
             // White

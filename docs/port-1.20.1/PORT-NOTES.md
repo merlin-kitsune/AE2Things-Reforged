@@ -11,9 +11,9 @@
 | AE2 | **15.4.12**（1.20.1 Forge 最新），由 `gradle.properties: ae2_version_id=QRpVsqDI` 锁定（Modrinth 上 15.4.12 的**默认文件是 Fabric jar**，必须用版本 id 才能拿到 Forge jar） |
 | Forge API | **47.1.47**（AE2 15.4.12 自身编译所用版本），对用户声明下限 47.1.3 |
 | 版本号 | **1.3.0**（jar 名 `AE2-Things-1.3.0.jar`，manifest `Implementation-Version: 1.3.0`） |
-| 构建 | 通过（`spotlessCheck` + `build`），103 entries，80,454 B，sha256 `27488cd1902a6f1530d91e8a354ff335a8a0501c41a0902077de28cca9bae102` |
+| 构建 | 通过（`spotlessCheck` + `build`），103 entries，80,552 B，sha256 `f766e83dbc4010681530389ab6db37aa95c561fc5e494fba7db8c3a566c3868f` |
 | 开发服启动 | 通过：mod 容器创建、mixin 注入 `AbstractContainerMenu` 成功、数据包加载无报错 |
-| 提交 | 本地三次提交：`06d4b40`（移植）/ `613bd18`（persist 铸锚补漏）/ 复核修复批次（`git log -1`，见 §13）；**未推送**，等实机指令 |
+| 提交 | 本地四次提交：`06d4b40`（移植）/ `613bd18`（persist 铸锚补漏）/ `f27a496`（第二轮复核修复批次，见 §13）/ 本轮裁决落地（见 §14）；**未推送**，等实机指令 |
 
 ## 2. 目录与构建
 
@@ -281,7 +281,7 @@ cd F:/MCProject/ae2things-reforged/forge-1.20.1
 - **联调服务端（7 个 jar：AE2 15.4.12 + GuideME + 本模组 + AE2 MEGA Things 1.0.8 + KotlinForForge + MegaCells + Cloth Config）**：`Done (1.282s)!`；RCON 执行 `ae2things`（裸命令即帮助）输出仍带 MEGA 改写的 `/ae2things recover <UUID> [DISK] … You can change the disk to be spawned by the given DISK.` ⇒ `@ModifyConstant(lambda$help$3, ordinal 0)` 契约在本轮改动后依然成立；`stop` 干净退出，全日志 `NoSuchMethod/NoSuchField/AbstractMethod/ClassNotFound/InjectionError` 计数为 0，唯一 ERROR 是 megacells 自己的 `loot_tables:megacells:blocks/mega_emc_interface` 解析失败（与本模组无关）。
 - **未验证项**：两个 workflow 的 YAML 没有在 CI 实跑过（本机无 yaml 解析器，也不想靠 `npx` 联网装）；首次推送后需要看一眼 Actions 是否按预期分 job。
 
-### 13.2 三个待裁决项（都需要你点头）
+### 13.2 三个待裁决项（已于 2026-11-05 裁决，处置见 §14）
 
 1. **P1-3 / F2：`recover` 的语义怎么定**。复核给出第四种方案 **D：换新 UUID + 复制条目**（照 `IDISKCellItem.cloneDisk` 的写法：`copy()` 原条目 → `updateDisk(newId, copied)` → 写回物品 NBT，并在成功消息里报新 id）。
    - D 的好处：从机制上**不可能**出现两盘共用一个 UUID，改动约 8 行，不需要登记表，也不会漏掉驱动器/箱子里的盘。
@@ -291,3 +291,83 @@ cd F:/MCProject/ae2things-reforged/forge-1.20.1
 2. **P2-4：mixin 的 `required`**。`true` = 注入点一旦解析失败就启动失败（吵闹但安全）；`false` = 只记一行日志，创造模式中键复制失去守护（静默出双盘）。1.21.1 线当前也是 `false`，要改就两条线一起改。我的建议：**改成 true**，注入目标已验证稳定（`@Slice` 命中 bci 1428 的 `hasItem`，其后唯一 `copyWithCount` 在 1449）。
 3. **P2-5：manager 惰性解析**。现在依赖 AE2 的 `updateState()` 在首 tick 自愈；加固做法是让 `currentStorageManager()` 在没有实例但有运行中服务端时惰性初始化。要改动 3 个文件，实机验证成本较高。我的建议：**先不动**，把「重启后出生点驱动器里的盘是否正常显示」列进实机验收清单，出问题再加固。
 
+## 14. 裁决落地（2026-11-05）
+
+用户裁决原文（m01251）：**「裁决：1. D；2. 改true；3.等实机验证再决定。另外共享修复和DISKItemCellGuiHandler回灌到1.21.1」**
+
+| 裁决项 | 结论 | 落地 |
+|---|---|---|
+| P1-3 / F2 `recover` 语义 | **D：换新 UUID + 复制条目** | 1.20.1：`command/Command.java` `spawnDrive` 改为 `copied = storageManager.getDisk(uuid).copy()` → `newId = UUID.randomUUID()` → `updateDisk(newId, copied)` → 写回物品 `diskuuid` + `ic`，成功消息报**新 id**；1.21.1：同语义，但写的是数据组件 `DATA_DISK_ID` / `DATA_DISK_ITEM_COUNT` |
+| P2-4 mixin `required` | **改 `true`** | 两条线的 `mixins.ae2things.json` 均改为 `true`（注入点一旦解析失败即启动失败，不再静默丢掉中键复制守护） |
+| P2-5 manager 惰性解析 | **先不动** | 依赖 AE2 `updateState()` 自愈；把「重启后出生点驱动器里的盘是否正常显示」列入实机验收清单 |
+
+补充说明：装了 AE2 MEGA Things 时，Brigadier 的 `addChild` 是合并语义，MEGA 自己的 `recover` executor 会**覆盖**我们的执行器，因此 D 只决定「单独装本模组」时的行为；两条线都要各自实现一份，以免依赖 MEGA 的存在。
+
+### 14.1 本轮 1.20.1 线的实测证据
+
+| 项 | 结果 |
+|---|---|
+| 构建 | `./gradlew spotlessApply build` → BUILD SUCCESSFUL（11 s） |
+| 产物 | `AE2-Things-1.3.0.jar`，103 entries，80,552 B，sha256 `f766e83dbc4010681530389ab6db37aa95c561fc5e494fba7db8c3a566c3868f` |
+| 联调服务端（7 jar：AE2 15.4.12 + GuideME 20.1.15 + 本模组 + MEGA 1.0.8 + KotlinForForge 4.12.0 + MegaCells 2.4.6 + Cloth Config 11.1.136） | `Done (1.164s)!` |
+| RCON `ae2things`（裸命令 = help） | 输出仍为 MEGA 改写后的 `/ae2things recover <UUID> [DISK] - Spawns a drive with the given UUID, if it doesn't exist, does not spawn any item. You can change the disk to be spawned by the given DISK.` ⇒ `@ModifyConstant(lambda$help$3, ordinal 0)` 在 `required: true` 下依然命中 |
+| 全日志错误计数 | `NoSuchMethod / NoSuchField / AbstractMethod / ClassNotFound / InjectionError` = 0；唯一 ERROR 为 megacells 自身的 `loot_tables:megacells:blocks/mega_emc_interface` 解析失败（与本模组无关） |
+| 停机 | RCON `stop` 干净退出，`All chunks are saved` / `All dimensions are saved` |
+
+> 注：`/ae2things recover` 本身需要玩家执行（服务端控制台会答 `A player is required to run this command here`），所以 D 的执行路径这一条**只做了编译与契约层验证**，语义由 1.21.1 线的同形自测（§15.2）覆盖。
+
+## 15. 共享修复回灌到 1.21.1 线（版本 1.4.4）
+
+两条线的持久化/渲染修复本来就是同一套问题，本轮把它们回灌到根工程，同时把版本号改为**每线独立**：根 `gradle.properties: mod_version=1.4.4`，1.20.1 线 `mod_version=1.3.0`。
+
+| 修复 | 1.21.1 线的落点 | 与 1.20.1 线的差异 |
+|---|---|---|
+| C2 读路径不再建条目 | `StorageManager.getDisk(UUID)`（缺省返回 `DataStorage.EMPTY`）；`DISKCellInventory.getDiskStorage()` 改为只读 | 同形 |
+| C2b 私有构造不再 `setDirty` | `StorageManager( Map, List )` 私有构造去掉 `setDirty()` | 同形 |
+| C3 坏条目不再静默清表 | `readNbt` 先 `hasUUID` 再 `getUUID`，解码异常也捕获；坏条目进 `unreadable` | **失败形态不同**：1.20.1 的 `CompoundTag.getUUID` 缺键返回 null（→ 曾 NPE），1.21.1 是**抛 NPE**，所以两条线都必须先 `hasUUID` |
+| P1-1 坏条目保留 | `unreadable` 字段 + `save()` 末尾 `diskList.addAll(unreadable)` | 同形 |
+| C4 SIMULATE 不再铸 id | `insert()` 先读现有数量，MODULATE 分支才铸 UUID + `loadCellItems()` | 同形 |
+| C9 / P2-6 无 manager 拒绝写 | `insert()` / `extract()` 在 MODULATE 且 `storageManager == null` 时返回 0 | 同形 |
+| C5 拆解清条目 | `DISKDrive` 拆解路径先 `removeDisk(diskId)` 再掉零件 | 同形 |
+| P2-7 `copy()` 深拷贝 | `DataStorage.copy()` 逐条 `getCompound(i).copy()` | 同形 |
+| P2-9 渲染热路径 | `DISKCellInventory.getClientStatus(ItemStack)` / `getTotalBytes(ItemStack)` 静态化，`DISKDrive.getColor` 不再建 inventory | 同形（tooltip 保留虚调用，MEGA 契约） |
+| P3-10 / P3-11 | `help()` 的 lambda 契约 javadoc；`recover` 走 `getDisk` | 同形 |
+
+### 15.1 构建期踩到的两个坑（都已修）
+
+1. `build.gradle` 的 `format("json") { prettier() }` 块被**移除**：spotless 6.25 用 `--scripts-prepend-node-path` 启动 npm，本机 npm 直接拒绝（`npm error code EUNKNOWNCONFIG` / `Unknown cli flag: - --scripts-prepend-node-path`），而任务只在**有 JSON 文件变更**时才真正执行 —— 本轮改了 `mixins.ae2things.json` 才第一次炸出 `:spotlessJson FAILED`。1.20.1 线从来没有这个块。
+2. `DISKDrive` 拆解处一开始写了 `DISKCellInventory.getDiskUUID(stack)`，但 1.21.1 线的 `getDiskUUID` **没有静态重载**（编译错误：`无法将类 DISKCellInventory中的方法 getDiskUUID应用到给定类型`）→ 改用 `stack.get(AE2Things.DATA_DISK_ID)`。
+
+### 15.2 回灌后的运行时自测（开发服，临时钩子，已删除）
+
+在 `AE2Things.onServerStarted` 里临时挂了一段自测，四件事一次跑完，输出：
+
+```
+[AE2T-DEBUG] retentionMarker=true independent=true noMintOnSimulate=true nullManagerRefused=true
+```
+
+| 断言 | 含义 |
+|---|---|
+| `retentionMarker=true` | 构造 `disklist` = 1 条合法 + 1 条缺 `disk_id` 的坏条目，`readNbt` → `save` 往返后坏条目（`marker=keep-me`）仍在 ⇒ P1-1 在 1.21.1 的键名形态下成立 |
+| `independent=true` | `getDisk(src).copy()` → `updateDisk(newId, copied)` 后原地改 `copied.stackAmounts[0]`，源条目仍是 9、新条目是 1、两条都在 ⇒ recover-D 的复制独立性成立 |
+| `noMintOnSimulate=true` | 对空 256k 盘做 64 个石头的 `SIMULATE` 插入返回 64，且物品上**没有** `DATA_DISK_ID` ⇒ C4 成立 |
+| `nullManagerRefused=true` | `storageManager == null` 时 MODULATE 插入返回 0 ⇒ C9 成立 |
+
+自测代码与调用点已删除；重建后 jar 与自测前**逐字节相同**（`grep -rn 'selfTest\|AE2T-DEBUG' src/` 无残留）。
+
+### 15.3 本轮 1.21.1 产物
+
+| 项 | 结果 |
+|---|---|
+| 版本 | `gradle.properties: mod_version=1.4.4`（根 `build.gradle: version = mod_version`，不再用环境变量 `AE2THINGS_VERSION`） |
+| 构建 | `./gradlew spotlessApply build` → BUILD SUCCESSFUL |
+| 产物 | `build/libs/AE2-Things-1.4.4.jar`，70,038 B，sha256 `b59d3de408009dc845965b0bd75f4fbf07a0b61451edc4235ebed47ecdd92dd8` |
+
+## 16. `DISKItemCellGuiHandler` 回灌结论：**不需要**（AE2 19 已内置）
+
+用户要求把 `DISKItemCellGuiHandler` 回灌到 1.21.1，但取证结论是该扩展点在 AE2 19.2.18 **已被删除**，且行为已被 AE2 原生接管：
+
+- `javap -p -cp <ae2-19.2.18.jar> appeng.api.storage.StorageCells` 只剩 `addCellHandler` / `isCellHandled` / `getHandler` / `getCellInventory`，**没有** `addCellGuiHandler` / `getGuiHandler`；`appeng/api/storage/cells/ICellGuiHandler.class` **整个不存在**（该目录只有 `ICellHandler / CellState / ISaveProvider / ICellWorkbenchItem / IBasicCellItem / StorageCell`），全 jar 字节扫描 `ICellGuiHandler` / `addCellGuiHandler` / `openChestGui` 命中 0。
+- 19.2.18 的链路：`MEChestBlock.useWithoutItem` → `MEChestBlockEntity.openGui(Player)` → `StorageCells.getHandler(cell)` + `BasicCellChestMenu.TYPE`（`extends MEStorageMenu`）→ 直接开 ME 存储界面。我们对任意 `IDISKCellItem` 都返回库存（`DISKCellHandler.getCellInventory` → `DISKCellInventory.createInventory`），所以**点 ME 箱子顶面本来就开 ME 存储界面**。
+- 上游为什么非注册不可：1.20.1 默认处理器 `BasicItemCellGuiHandler.isSpecializedFor` 要求 `instanceof IBasicCellItem`，而我们的 `DISKDrive extends Item implements IDISKCellItem` 不是；19 把判据换成了 `ICellHandler`，我们本来就注册了。
+- 因此：1.21.1 线**不新建** `DISKItemCellGuiHandler`；1.20.1 线的 `gui/cell/DISKItemCellGuiHandler.java` **保留**（15.4.12 仍然需要它）。

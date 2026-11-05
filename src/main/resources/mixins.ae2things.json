@@ -1,6 +1,6 @@
 {
   "package": "io.github.projectet.ae2things.mixin",
-  "required": false,
+  "required": true,
   "minVersion": "0.8",
   "compatibilityLevel": "JAVA_21",
   "mixins": ["CursedInternalSlotMixin"],

@@ -63,15 +63,22 @@ public class Command {
         var storageManager = AE2Things.currentStorageManager();
 
         if (storageManager != null && storageManager.hasUUID(uuid)) {
-            ItemStack stack = new ItemStack(AETItems.DISK_DRIVE_256K.get());
+            // Hand the player a copy under a fresh id instead of a second item pointing at the same entry. Reusing the
+            // stored id would put two live cells on one entry: each keeps its own copy of the contents and writes the
+            // whole key list back, so the last writer wins, and emptying one of them deletes the entry the other is
+            // still pointing at.
+            var copied = storageManager.getDisk(uuid).copy();
+            var newId = UUID.randomUUID();
+            storageManager.updateDisk(newId, copied);
 
-            stack.set(AE2Things.DATA_DISK_ID, uuid);
-            stack.set(AE2Things.DATA_DISK_ITEM_COUNT, storageManager.getOrCreateDisk(uuid).itemCount);
+            ItemStack stack = new ItemStack(AETItems.DISK_DRIVE_256K.get());
+            stack.set(AE2Things.DATA_DISK_ID, newId);
+            stack.set(AE2Things.DATA_DISK_ITEM_COUNT, copied.itemCount);
 
             player.addItem(stack);
 
             context.getSource().sendSuccess(
-                    () -> Component.translatable("command.ae2things.recover_success", player.getDisplayName(), uuid),
+                    () -> Component.translatable("command.ae2things.recover_success", player.getDisplayName(), newId),
                     true);
             return 0;
         } else {

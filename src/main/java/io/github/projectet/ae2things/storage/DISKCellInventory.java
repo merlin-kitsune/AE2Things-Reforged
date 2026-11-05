@@ -86,9 +86,14 @@ public class DISKCellInventory implements StorageCell {
         partitionList = builder.build();
     }
 
+    /**
+     * Read-only view of the backing entry. Creating an entry is left to {@link #persist()} and to modifying inserts, so
+     * that merely inspecting a cell (tooltips, drive visuals, capacity probes) cannot grow the side table.
+     */
     private DataStorage getDiskStorage() {
-        if (getDiskUUID() != null && storageManager != null) {
-            return storageManager.getOrCreateDisk(getDiskUUID());
+        var diskId = getDiskUUID();
+        if (diskId != null && storageManager != null) {
+            return storageManager.getDisk(diskId);
         } else {
             return DataStorage.EMPTY;
         }
@@ -141,10 +146,20 @@ public class DISKCellInventory implements StorageCell {
     }
 
     public CellState getClientStatus() {
-        if (this.getNbtItemCount() == 0) {
+        return getClientStatus(this.i);
+    }
+
+    /**
+     * Status that only reads the item itself. Render paths (LED colour, tooltips) use this instead of building a whole
+     * cell inventory: that would read the cell config and parse the upgrade inventory once per rendered layer per
+     * frame.
+     */
+    public static CellState getClientStatus(ItemStack disk) {
+        var itemCount = getNbtItemCount(disk);
+        if (itemCount == 0) {
             return CellState.EMPTY;
         }
-        if ((getNbtItemCount() > 0 && getNbtItemCount() != getTotalBytes())) {
+        if (itemCount != getTotalBytes(disk)) {
             return CellState.NOT_EMPTY;
         }
         return CellState.FULL;
@@ -167,9 +182,11 @@ public class DISKCellInventory implements StorageCell {
             return;
         }
 
+        var diskId = getDiskUUID();
+
         if (storedItemCount == 0) {
-            if (hasDiskUUID()) {
-                storageManager.removeDisk(getDiskUUID());
+            if (diskId != null) {
+                storageManager.removeDisk(diskId);
                 i.remove(AE2Things.DATA_DISK_ID);
                 i.remove(AE2Things.DATA_DISK_ITEM_COUNT);
                 initData();
@@ -178,12 +195,18 @@ public class DISKCellInventory implements StorageCell {
             return;
         }
 
-        var diskStorage = getDiskStorage();
-        if (diskStorage == DataStorage.EMPTY) {
-            // No disk entry is backing this cell, so there is nothing to write to.
-            this.isPersisted = true;
-            return;
+        if (diskId == null) {
+            // A cell can carry contents and still have no usable id: the disk id component may be missing, or hold a
+            // value that is not a UUID (stack data edited by hand, or copied from a save written by another version of
+            // this mod). Writing those contents anywhere requires an id, so mint one here instead of quietly keeping
+            // them in this instance until the cell unloads.
+            diskId = UUID.randomUUID();
+            i.set(AE2Things.DATA_DISK_ID, diskId);
         }
+
+        // Writing is the one place that may create the entry: a cell that never received anything real (a simulated
+        // insert, a creative-tab probe) must not leave an empty record behind.
+        var diskStorage = storageManager.getOrCreateDisk(diskId);
 
         // Most content changes only change the amount of a key that is already stored. Those can be written in place,
         // which avoids rebuilding the key list and re-encoding the keys. AE2 keys compare by value, so the stored key
@@ -196,14 +219,14 @@ public class DISKCellInventory implements StorageCell {
             itemCount = diskStorage.rebuildFrom(this.storedAmounts, storageManager.getRegistries());
 
             if (diskStorage.stackKeys.isEmpty()) {
-                storageManager.updateDisk(getDiskUUID(), new DataStorage());
+                storageManager.updateDisk(diskId, new DataStorage());
             } else {
-                storageManager.modifyDisk(getDiskUUID(), diskStorage.stackKeys, diskStorage.stackAmounts, itemCount);
+                storageManager.modifyDisk(diskId, diskStorage.stackKeys, diskStorage.stackAmounts, itemCount);
                 // Keys that are no longer on the disk do not have to be remembered.
                 diskStorage.pruneKeyTags(this.storedAmounts);
             }
         } else {
-            storageManager.updateDisk(getDiskUUID(), diskStorage);
+            storageManager.updateDisk(diskId, diskStorage);
         }
 
         this.storedItems = this.storedAmounts.size();
@@ -393,12 +416,6 @@ public class DISKCellInventory implements StorageCell {
             }
         }
 
-        if (storageManager != null && !hasDiskUUID()) {
-            i.set(AE2Things.DATA_DISK_ID, UUID.randomUUID());
-            storageManager.getOrCreateDisk(getDiskUUID());
-            loadCellItems();
-        }
-
         var currentAmount = this.getCellItems().getLong(what);
         long remainingItemCount = getRemainingItemCount();
 
@@ -412,6 +429,20 @@ public class DISKCellInventory implements StorageCell {
         }
 
         if (mode == Actionable.MODULATE) {
+            if (storageManager == null) {
+                // Nowhere to keep the contents: accept the simulated call, refuse the real one instead of holding the
+                // items in an instance that can never write them anywhere.
+                return 0;
+            }
+
+            // Minting the id has to happen after the capacity check and only for a real change: doing it up front made
+            // a zero-capacity probe (a simulated insert) create a disk id and dirty the world save.
+            if (!hasDiskUUID()) {
+                i.set(AE2Things.DATA_DISK_ID, UUID.randomUUID());
+                storageManager.getOrCreateDisk(getDiskUUID());
+                loadCellItems();
+            }
+
             getCellItems().put(what, currentAmount + amount);
             this.saveChanges(amount);
         }
@@ -423,6 +454,11 @@ public class DISKCellInventory implements StorageCell {
     public long extract(AEKey what, long amount, Actionable mode, IActionSource source) {
         if (amount <= 0) {
             // Nothing is extracted, so do not make the cell dirty for nothing.
+            return 0;
+        }
+
+        if (mode == Actionable.MODULATE && storageManager == null) {
+            // Symmetric with insert(): a cell that can never be written must not lose its contents to a real extract.
             return 0;
         }
 
@@ -455,13 +491,21 @@ public class DISKCellInventory implements StorageCell {
         return this.cellType.getBytes(this.i);
     }
 
+    public static long getTotalBytes(ItemStack disk) {
+        return disk.getItem() instanceof IDISKCellItem cellType ? cellType.getBytes(disk) : 0;
+    }
+
     public long getFreeBytes() {
         return this.getTotalBytes() - this.getStoredItemCount();
     }
 
     public long getNbtItemCount() {
-        if (hasDiskUUID()) {
-            return i.getOrDefault(AE2Things.DATA_DISK_ITEM_COUNT, 0L);
+        return getNbtItemCount(this.i);
+    }
+
+    public static long getNbtItemCount(ItemStack disk) {
+        if (hasDiskUUID(disk)) {
+            return disk.getOrDefault(AE2Things.DATA_DISK_ITEM_COUNT, 0L);
         }
         return 0;
     }

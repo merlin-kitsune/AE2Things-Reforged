@@ -116,9 +116,7 @@ spotless {
         importOrderFile("codeformat/ae2.importorder")
     }
 
-    format("json") {
-        target("src/*/resources/**/*.json")
-        targetExclude("src/generated/resources/**")
-        prettier().config(parser: "json")
-    }
+    // The prettier JSON step is gone on purpose: spotless 6.25 starts npm with --scripts-prepend-node-path, which
+    // current npm rejects (EUNKNOWNCONFIG), so the step can only fail once a JSON file actually changes. The JSON here
+    // is hand-kept and small, and the 1.20.1 line never had the step.
 }
